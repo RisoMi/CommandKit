@@ -1,0 +1,132 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS：universal 二进制，同时支持 Apple Silicon 与 Intel
+          - name: macos-universal
+            os: macos-latest
+            target: universal-apple-darwin
+            args: --target universal-apple-darwin
+          # Windows：产出便携版 exe + NSIS 安装包
+          - name: windows-x64
+            os: windows-latest
+            target: ""
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.name }}
+
+      - name: Install frontend deps
+        run: npm ci --no-audit --no-fund
+
+      - name: cargo test（内核 + 运行时）
+        run: cargo test --manifest-path src-tauri/Cargo.toml --tests
+
+      - name: Build bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Package macOS .app
+        if: runner.os == 'macOS'
+        run: |
+          cd "src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          ditto -c -k --sequesterRsrc --keepParent CommandKit.app "$GITHUB_WORKSPACE/CommandKit-macos-universal.zip"
+          ls -lh "$GITHUB_WORKSPACE/CommandKit-macos-universal.zip"
+
+      - name: Package Windows portable exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src-tauri\target\release\commandkit.exe out\CommandKit-portable.exe
+          $note = @"
+          CommandKit · Windows 便携版
+          ================================
+          1. 把 CommandKit-portable.exe 放到任意有写权限的目录（不要放 Program Files / 只读 U 盘 / 网络盘）
+          2. 双击运行，首次启动会在 exe 同目录创建 data\ 目录
+          3. 模板、项目、设置、日志全部在 data\ 内：整目录拷贝即迁移，删除即卸载
+          4. 不写注册表 / 不写 AppData
+
+          依赖 WebView2 运行时：Windows 11 自带；Windows 10 若缺失，请先安装
+          https://developer.microsoft.com/microsoft-edge/webview2/
+          "@
+          $note | Set-Content -Encoding utf8 out\README-portable.txt
+          Compress-Archive -Path out\* -DestinationPath CommandKit-windows-x64.zip -Force
+          Get-ChildItem CommandKit-windows-x64.zip | Format-List Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CommandKit-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            CommandKit-*.zip
+            src-tauri/target/**/bundle/**/*.exe
+
+  release:
+    name: publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -lR artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            CommandKit ${{ github.ref_name }}
+
+            - macOS：`CommandKit-macos-universal.zip`（universal，支持 Apple Silicon / Intel）
+            - Windows：`CommandKit-windows-x64.zip`（便携版 exe + 说明）、`CommandKit_*_x64-setup.exe`（NSIS 安装包）
+
+            macOS 包未签名 / 未公证，首次打开需右键「打开」，或执行
+            `xattr -dr com.apple.quarantine /Applications/CommandKit.app`。
+            Windows 便携版解压即用，首次运行在 exe 同目录生成 `data\`。
