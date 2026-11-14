@@ -106,7 +106,8 @@ jobs:
           retention-days: 30
           path: |
             CommandKit-*.zip
-            src-tauri/target/**/bundle/**/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
 
   release:
     name: publish release

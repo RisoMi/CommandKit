@@ -1,5 +1,7 @@
 # CommandKit
 
+[![build](https://github.com/RisoMi/CommandKit/actions/workflows/build.yml/badge.svg)](https://github.com/RisoMi/CommandKit/actions/workflows/build.yml)
+
 命令环境模板 + 多项目进程管理桌面应用。Tauri 2（Rust 进程监管 + Vue 3 前端），
 Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Application Support/CommandKit/`）。
 
@@ -21,6 +23,9 @@ Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Appli
 | `publish release` | 仅 tag 触发，把上面所有 zip / exe 挂到 GitHub Release |
 
 - 任意一次 run 的产物在 Actions 页面的 **Artifacts** 可直接下载（保留 30 天）。
+- Windows 的 `cargo test` 在 CI 上按用例逐个执行（`node scripts/ci-test.mjs --per-case`）：
+  同一个进程里连续创建多个 mock Tauri App 时，进程会被 `STATUS_CONTROL_C_EXIT` 中断；
+  逐个用例隔离后 11 个用例全部通过。这是 mock 运行时的限制，不影响应用本体（应用只创建一个 App）。
 - 发布正式版本：`git tag v1.1.0 && git push origin v1.1.0`，等 workflow 完成后到 Releases 取包。
 
 ```bash
