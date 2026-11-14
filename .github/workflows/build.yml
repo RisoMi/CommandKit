@@ -91,11 +91,25 @@ jobs:
           3. 模板、项目、设置、日志全部在 data\ 内：整目录拷贝即迁移，删除即卸载
           4. 不写注册表 / 不写 AppData
 
+          若更习惯安装包，可用 installer\ 子目录里的 NSIS 安装程序（currentUser，免管理员）。
+
           依赖 WebView2 运行时：Windows 11 自带；Windows 10 若缺失，请先安装
           https://developer.microsoft.com/microsoft-edge/webview2/
           "@
           $note | Set-Content -Encoding utf8 out\README-portable.txt
+
+          # 安装包一起放进 zip：Release 只需一个 Windows 资产，用户不用再找第二个文件
+          $setup = Get-ChildItem src-tauri\target\release\bundle\nsis\*.exe -ErrorAction SilentlyContinue
+          if ($setup) {
+            New-Item -ItemType Directory -Force out\installer | Out-Null
+            Copy-Item $setup.FullName out\installer\
+            Write-Output "installer: $($setup.Name)"
+          } else {
+            Write-Warning "NSIS installer 未生成，zip 内仅含便携 exe"
+          }
+
           Compress-Archive -Path out\* -DestinationPath CommandKit-windows-x64.zip -Force
+          Get-ChildItem out -Recurse | Select-Object FullName, Length
           Get-ChildItem CommandKit-windows-x64.zip | Format-List Name, Length
 
       - name: Upload artifacts
