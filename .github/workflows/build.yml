@@ -55,7 +55,13 @@ jobs:
 
       # 失败时把关键行转成 check-run annotation：公开仓库无 token 也能在 commit 页看到原因
       - name: cargo test（内核 + 运行时）
+        if: runner.os != 'Windows'
         run: node scripts/ci-test.mjs
+
+      # Windows 上逐用例执行：进程被异常中断时能定位到具体用例
+      - name: cargo test（Windows · 逐用例）
+        if: runner.os == 'Windows'
+        run: node scripts/ci-test.mjs --per-case
 
       - name: Build bundles
         uses: tauri-apps/tauri-action@v0
