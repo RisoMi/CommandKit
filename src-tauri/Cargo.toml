@@ -1,6 +1,6 @@
 [package]
 name = "commandkit"
-version = "1.1.1"
+version = "1.1.2"
 description = "CommandKit · 命令环境模板与多项目进程管理"
 authors = ["CommandKit"]
 edition = "2021"
