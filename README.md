@@ -19,7 +19,7 @@ Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Appli
 | Job | 内容 |
 | --- | --- |
 | `build (macos-universal)` | `cargo test` → universal `.app` → `CommandKit-macos-universal.zip` |
-| `build (windows-x64)` | `cargo test` → 便携 `CommandKit-portable.exe`（打 zip，含说明）→ NSIS 安装包 |
+| `build (windows-x64)` | `cargo test` → `CommandKit-windows-x64.zip`（便携 exe + 说明 + `installer/` 内的 NSIS 安装程序） |
 | `publish release` | 仅 tag 触发，把上面所有 zip / exe 挂到 GitHub Release |
 
 - 任意一次 run 的产物在 Actions 页面的 **Artifacts** 可直接下载（保留 30 天）。

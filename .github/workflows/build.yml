@@ -147,7 +147,7 @@ jobs:
             CommandKit ${{ github.ref_name }}
 
             - macOS：`CommandKit-macos-universal.zip`（universal，支持 Apple Silicon / Intel）
-            - Windows：`CommandKit-windows-x64.zip`（便携版 exe + 说明）、`CommandKit_*_x64-setup.exe`（NSIS 安装包）
+            - Windows：`CommandKit-windows-x64.zip`（便携 exe + 说明 + `installer/` 内的 NSIS 安装程序）
 
             macOS 包未签名 / 未公证，首次打开需右键「打开」，或执行
             `xattr -dr com.apple.quarantine /Applications/CommandKit.app`。
