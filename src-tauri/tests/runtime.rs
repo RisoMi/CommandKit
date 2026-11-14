@@ -1,5 +1,7 @@
 //! 运行时端到端测试：真起子 shell、抓输出、健康检查、整树终止。
-//! 用 tauri 的 mock 运行时构造 AppHandle，不需要开窗口。
+//!
+//! supervisor 只依赖 `EventSink` 抽象，测试用 `NullSink` 即可，
+//! 不需要 Tauri 运行时（否则 Windows 上会因链接 wry/WebView2 而 STATUS_ENTRYPOINT_NOT_FOUND）。
 //!
 //! 命令按平台分支：macOS 走 zsh 语法，Windows 走 PowerShell 语法（CI 两个平台都跑）。
 
@@ -9,7 +11,7 @@ use std::time::Duration;
 
 use commandkit_lib::model::{HealthCheck, Policy, Status};
 use commandkit_lib::state::AppState;
-use commandkit_lib::supervisor::{self, SpawnSpec};
+use commandkit_lib::supervisor::{self, EventSink, NullSink, SpawnSpec};
 
 fn temp_root(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("commandkit-rt-{}-{}", tag, std::process::id()));
@@ -34,12 +36,9 @@ fn spec(id: &str, command: &str, health: Option<HealthCheck>) -> SpawnSpec {
     }
 }
 
-fn app_handle() -> tauri::AppHandle<tauri::test::MockRuntime> {
-    tauri::test::mock_builder()
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("mock app")
-        .handle()
-        .clone()
+/// 事件出口：测试里吞掉所有事件
+fn sink() -> Arc<dyn EventSink> {
+    Arc::new(NullSink)
 }
 
 fn make_state(tag: &str) -> Arc<AppState> {
@@ -89,7 +88,7 @@ fn long_running() -> &'static str {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn captures_stdout_and_exit_code() {
-    let handle = app_handle();
+    let sink = sink();
     let state = make_state("out");
     let cmd = if cfg!(windows) {
         "Write-Output 'hello-from-test'; [Console]::Error.WriteLine('错误行'); Start-Sleep -Milliseconds 300"
@@ -97,7 +96,7 @@ async fn captures_stdout_and_exit_code() {
         "echo hello-from-test && echo 错误行 1>&2 && sleep 0.3"
     };
     let s = spec("t-out", cmd, None);
-    supervisor::start(handle, state.clone(), s).await.unwrap();
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
 
     assert!(
         wait_status(&state, "t-out", Status::Stopped, 12000).await,
@@ -116,10 +115,10 @@ async fn captures_stdout_and_exit_code() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn non_zero_exit_marks_failed() {
-    let handle = app_handle();
+    let sink = sink();
     let state = make_state("fail");
     let s = spec("t-fail", "exit 3", None);
-    supervisor::start(handle, state.clone(), s).await.unwrap();
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
     assert!(
         wait_status(&state, "t-fail", Status::Failed, 12000).await,
         "非零退出应标记 Failed"
@@ -136,7 +135,7 @@ async fn health_check_gates_running_then_stop_kills_tree() {
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || listener.accept().map(|_| ()).ok());
 
-    let handle = app_handle();
+    let sink = sink();
     let state = make_state("health");
     let health = HealthCheck {
         url: None,
@@ -146,7 +145,7 @@ async fn health_check_gates_running_then_stop_kills_tree() {
         interval_ms: 150,
     };
     let s = spec("t-health", long_running(), Some(health));
-    supervisor::start(handle, state.clone(), s).await.unwrap();
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
 
     assert!(
         wait_status(&state, "t-health", Status::Running, 12000).await,
@@ -159,9 +158,7 @@ async fn health_check_gates_running_then_stop_kills_tree() {
         .unwrap();
     assert!(pid > 0);
 
-    supervisor::stop(&app_handle(), &state, "t-health")
-        .await
-        .unwrap();
+    supervisor::stop(&sink, &state, "t-health").await.unwrap();
     assert!(
         wait_status(&state, "t-health", Status::Stopped, 12000).await,
         "停止后应转 Stopped"
@@ -174,7 +171,7 @@ async fn health_check_gates_running_then_stop_kills_tree() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn env_is_injected_without_touching_system() {
-    let handle = app_handle();
+    let sink = sink();
     let state = make_state("env");
     let cmd = if cfg!(windows) {
         "Write-Output \"CK-$env:CK_MARK\""
@@ -183,7 +180,7 @@ async fn env_is_injected_without_touching_system() {
     };
     let mut s = spec("t-env", cmd, None);
     s.env.insert("CK_MARK".into(), "9527".into());
-    supervisor::start(handle, state.clone(), s).await.unwrap();
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
     assert!(wait_status(&state, "t-env", Status::Stopped, 12000).await);
 
     let text: String = supervisor::log_snapshot(&state, "t-env")
@@ -199,10 +196,10 @@ async fn env_is_injected_without_touching_system() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_workdir_reports_error_and_keeps_state_clean() {
-    let handle = app_handle();
+    let sink = sink();
     let state = make_state("no-dir");
     let mut s = spec("t-dir", "echo x", None);
     s.workdir = "/definitely/not/here-commandkit".into();
-    let err = supervisor::start(handle, state.clone(), s).await.unwrap_err();
+    let err = supervisor::start(sink.clone(), state.clone(), s).await.unwrap_err();
     assert!(err.contains("工作目录不存在"), "应给出明确原因：{err}");
 }

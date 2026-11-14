@@ -15,6 +15,28 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime};
+
+/// 事件出口：进程监管只依赖这个极小接口，不依赖 Tauri 运行时。
+/// 这样测试可以用 NullSink，不必链接 wry / WebView2（Windows 上会 STATUS_ENTRYPOINT_NOT_FOUND）。
+pub trait EventSink: Send + Sync + 'static {
+    fn emit_event(&self, event: &str, payload: serde_json::Value);
+}
+
+/// 生产实现：转发到 Tauri 事件总线
+pub struct TauriSink<R: Runtime>(pub AppHandle<R>);
+
+impl<R: Runtime> EventSink for TauriSink<R> {
+    fn emit_event(&self, event: &str, payload: serde_json::Value) {
+        let _ = self.0.emit(event, payload);
+    }
+}
+
+/// 测试实现：吞掉事件
+pub struct NullSink;
+
+impl EventSink for NullSink {
+    fn emit_event(&self, _event: &str, _payload: serde_json::Value) {}
+}
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -125,8 +147,11 @@ impl Session {
     }
 }
 
-fn emit_session<R: Runtime>(app: &AppHandle<R>, s: &Session) {
-    let _ = app.emit("ck:session", s.view());
+fn emit_session(sink: &Arc<dyn EventSink>, s: &Session) {
+    sink.emit_event(
+        "ck:session",
+        serde_json::to_value(s.view()).unwrap_or(serde_json::Value::Null),
+    );
 }
 
 // ---------------------------------------------------------------- spec 构造
@@ -347,7 +372,7 @@ impl Decoder {
     }
 }
 
-fn push_chunk<R: Runtime>(app: &AppHandle<R>, session: &Session, data: &str, stream: &'static str) {
+fn push_chunk(sink: &Arc<dyn EventSink>, session: &Session, data: &str, stream: &'static str) {
     if data.is_empty() {
         return;
     }
@@ -371,15 +396,14 @@ fn push_chunk<R: Runtime>(app: &AppHandle<R>, session: &Session, data: &str, str
     }
     drop(inner);
 
-    let _ = app.emit(
+    sink.emit_event(
         "ck:term",
         json!({ "id": session.id, "seq": seq, "stream": stream, "data": data }),
     );
 }
 
-async fn pump<R, S>(app: AppHandle<R>, session: Arc<Session>, mut reader: S, stream: &'static str)
+async fn pump<S>(sink: Arc<dyn EventSink>, session: Arc<Session>, mut reader: S, stream: &'static str)
 where
-    R: Runtime,
     S: AsyncRead + Unpin + Send + 'static,
 {
     let mut decoder = Decoder::new();
@@ -389,7 +413,7 @@ where
             Ok(0) => break,
             Ok(n) => {
                 let text = decoder.push(&buf[..n]);
-                push_chunk(&app, &session, &text, stream);
+                push_chunk(&sink, &session, &text, stream);
             }
             Err(_) => break,
         }
@@ -422,7 +446,11 @@ fn open_log_file(root: &PathBuf, spec: &SpawnSpec, enabled: bool) -> Option<std:
 
 // ---------------------------------------------------------------- 启动
 
-pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: SpawnSpec) -> Result<(), String> {
+pub async fn start(
+    sink: Arc<dyn EventSink>,
+    state: Arc<AppState>,
+    spec: SpawnSpec,
+) -> Result<(), String> {
     let persist = {
         let data = state.data.lock().unwrap();
         data.settings.persist_logs
@@ -464,15 +492,15 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
         inner.started_instant = Some(Instant::now());
         inner.log_file = open_log_file(&state.root, &spec, persist);
     }
-    emit_session(&app, &session);
+    emit_session(&sink, &session);
 
     push_chunk(
-        &app,
+        &sink,
         &session,
         &format!("\u{1b}[90m# 独立会话 · cwd={} · env 由 Rust 注入\u{1b}[0m\n", spec.workdir),
         "out",
     );
-    push_chunk(&app, &session, &format!("\u{1b}[32m$\u{1b}[0m {}\n", spec.command), "out");
+    push_chunk(&sink, &session, &format!("\u{1b}[32m$\u{1b}[0m {}\n", spec.command), "out");
 
     // 端口预检：占用则给出明确提示（不阻止启动，交给用户判断）
     for port in &spec.ports {
@@ -481,7 +509,7 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
                 .await
                 .unwrap_or_else(|| "占用进程未知".into());
             push_chunk(
-                &app,
+                &sink,
                 &session,
                 &format!(
                     "\u{1b}[33m[preflight] 端口 {port} 已被占用（{owner}）\u{1b}[0m\n"
@@ -500,7 +528,7 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
                 if let Ok(mut alt) = build_command(&spec, "powershell.exe") {
                     if let Ok(c) = alt.spawn() {
                         push_chunk(
-                            &app,
+                            &sink,
                             &session,
                             "\u{1b}[33m# 未找到 pwsh.exe，已回退 windows powershell\u{1b}[0m\n",
                             "err",
@@ -519,8 +547,8 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
                         inner.error = Some(msg.clone());
                         inner.log_file = None;
                     }
-                    push_chunk(&app, &session, &format!("\u{1b}[31m{msg}\u{1b}[0m\n"), "err");
-                    emit_session(&app, &session);
+                    push_chunk(&sink, &session, &format!("\u{1b}[31m{msg}\u{1b}[0m\n"), "err");
+                    emit_session(&sink, &session);
                     return Err(msg);
                 }
             }
@@ -551,24 +579,24 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
     }
 
     if let Some(out) = stdout {
-        tokio::spawn(pump(app.clone(), session.clone(), out, "out"));
+        tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
     }
     if let Some(err) = stderr {
-        tokio::spawn(pump(app.clone(), session.clone(), err, "err"));
+        tokio::spawn(pump(sink.clone(), session.clone(), err, "err"));
     }
 
     {
-        let app2 = app.clone();
+        let sink2 = sink.clone();
         let state2 = state.clone();
         let s2 = session.clone();
         tokio::spawn(async move {
             let status = child.wait().await;
-            finish(&app2, &state2, &s2, status).await;
+            finish(&sink2, &state2, &s2, status).await;
         });
     }
 
     match spec.health.clone() {
-        Some(hc) => watch_health(app.clone(), session.clone(), hc),
+        Some(hc) => watch_health(sink.clone(), session.clone(), hc),
         None => {
             {
                 let mut inner = session.inner.lock().unwrap();
@@ -578,14 +606,14 @@ pub async fn start<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, spec: Sp
                     inner.health_ok = true;
                 }
             }
-            emit_session(&app, &session);
+            emit_session(&sink, &session);
         }
     }
 
     Ok(())
 }
 
-fn watch_health<R: Runtime>(app: AppHandle<R>, session: Arc<Session>, hc: HealthCheck) {
+fn watch_health(sink: Arc<dyn EventSink>, session: Arc<Session>, hc: HealthCheck) {
     tokio::spawn(async move {
         let deadline = Instant::now() + Duration::from_millis(hc.timeout_ms.max(1_000));
         let mut attempts = 0u32;
@@ -602,8 +630,8 @@ fn watch_health<R: Runtime>(app: AppHandle<R>, session: Arc<Session>, hc: Health
                     }
                     inner.health_ok = true;
                 }
-                emit_session(&app, &session);
-                let _ = app.emit(
+                emit_session(&sink, &session);
+                sink.emit_event(
                     "ck:health",
                     json!({ "id": session.id, "ok": true, "attempts": attempts + 1 }),
                 );
@@ -620,14 +648,14 @@ fn watch_health<R: Runtime>(app: AppHandle<R>, session: Arc<Session>, hc: Health
                     inner.error = Some(msg.clone());
                     inner.pid
                 };
-                emit_session(&app, &session);
-                push_chunk(&app, &session, &format!("\u{1b}[31m[health] {msg}\u{1b}[0m\n"), "err");
+                emit_session(&sink, &session);
+                push_chunk(&sink, &session, &format!("\u{1b}[31m[health] {msg}\u{1b}[0m\n"), "err");
                 if let Some(pid) = pid {
                     let _ = procs::terminate_tree(pid).await;
                 }
                 return;
             }
-            let _ = app.emit(
+            sink.emit_event(
                 "ck:health",
                 json!({ "id": session.id, "ok": false, "attempts": attempts }),
             );
@@ -701,8 +729,8 @@ async fn http_ok(url: &str) -> bool {
 
 // ---------------------------------------------------------------- 退出处理
 
-async fn finish<R: Runtime>(
-    app: &AppHandle<R>,
+async fn finish(
+    sink: &Arc<dyn EventSink>,
     state: &Arc<AppState>,
     session: &Arc<Session>,
     status: std::io::Result<std::process::ExitStatus>,
@@ -754,7 +782,7 @@ async fn finish<R: Runtime>(
         let code = inner.exit_code;
         drop(inner);
         push_chunk(
-            app,
+            sink,
             session,
             &format!(
                 "\u{1b}[90m# 会话结束（{}）\u{1b}[0m\n",
@@ -764,11 +792,11 @@ async fn finish<R: Runtime>(
             "out",
         );
     }
-    emit_session(app, session);
+    emit_session(sink, session);
 
     if restart {
         push_chunk(
-            app,
+            sink,
             session,
             "\u{1b}[33m# 自动重启策略触发（1s 后重新拉起）\u{1b}[0m\n",
             "out",
@@ -779,7 +807,11 @@ async fn finish<R: Runtime>(
 
 // ---------------------------------------------------------------- 停止 / 等待
 
-pub async fn stop<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: &str) -> Result<(), String> {
+pub async fn stop(
+    sink: &Arc<dyn EventSink>,
+    state: &Arc<AppState>,
+    id: &str,
+) -> Result<(), String> {
     let session = {
         let sessions = state.sessions.lock().unwrap();
         sessions.get(id).cloned()
@@ -801,7 +833,7 @@ pub async fn stop<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: &st
             inner.pid
         }
     };
-    emit_session(app, &session);
+    emit_session(sink, &session);
 
     if let Some(pid) = pid {
         if let Err(e) = procs::terminate_tree(pid).await {
@@ -809,7 +841,7 @@ pub async fn stop<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: &st
             inner.error = Some(e.clone());
             inner.status = Status::Failed;
             drop(inner);
-            emit_session(app, &session);
+            emit_session(sink, &session);
             return Err(e);
         }
     }
@@ -858,7 +890,11 @@ async fn wait_ready(session: &Arc<Session>, timeout: Duration) -> Result<(), Str
     }
 }
 
-pub async fn restart<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: &str) -> Result<(), String> {
+pub async fn restart(
+    sink: &Arc<dyn EventSink>,
+    state: &Arc<AppState>,
+    id: &str,
+) -> Result<(), String> {
     let spec = {
         let data = state.data.lock().unwrap();
         data.projects
@@ -876,7 +912,7 @@ pub async fn restart<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: 
                 .ok_or_else(|| format!("未知项目：{id}"))?
         }
     };
-    if let Err(e) = stop(app, state, id).await {
+    if let Err(e) = stop(sink, state, id).await {
         eprintln!("[commandkit] restart 前停止失败：{e}");
     }
     let existing = { state.sessions.lock().unwrap().get(id).cloned() };
@@ -889,7 +925,7 @@ pub async fn restart<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>, id: 
         .await;
         session.inner.lock().unwrap().restarts = 0;
     }
-    start(app.clone(), state.clone(), spec).await
+    start(sink.clone(), state.clone(), spec).await
 }
 
 pub fn send_input(state: &Arc<AppState>, id: &str, data: &str) -> Result<(), String> {
@@ -959,7 +995,7 @@ pub fn topo_order(projects: &[Project], selected: &[String]) -> Result<Vec<Strin
 
 // ---------------------------------------------------------------- 批量编排
 
-fn publish_bulk<R: Runtime>(state: &Arc<AppState>, app: &AppHandle<R>, mut b: BulkView) {
+fn publish_bulk(state: &Arc<AppState>, sink: &Arc<dyn EventSink>, mut b: BulkView) {
     let mut guard = state.bulk.lock().unwrap();
     if let Some(prev) = guard.as_ref() {
         if prev.cancelled {
@@ -968,16 +1004,16 @@ fn publish_bulk<R: Runtime>(state: &Arc<AppState>, app: &AppHandle<R>, mut b: Bu
     }
     *guard = Some(b.clone());
     drop(guard);
-    let _ = app.emit("ck:bulk", &b);
+    sink.emit_event("ck:bulk", serde_json::to_value(&b).unwrap_or(serde_json::Value::Null));
 }
 
-pub fn cancel_bulk<R: Runtime>(state: &Arc<AppState>, app: &AppHandle<R>) {
+pub fn cancel_bulk(state: &Arc<AppState>, sink: &Arc<dyn EventSink>) {
     let mut guard = state.bulk.lock().unwrap();
     if let Some(b) = guard.as_mut() {
         b.cancelled = true;
         let snapshot = b.clone();
         drop(guard);
-        let _ = app.emit("ck:bulk", &snapshot);
+        sink.emit_event("ck:bulk", serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null));
     }
 }
 
@@ -991,8 +1027,8 @@ fn bulk_cancelled(state: &Arc<AppState>) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn start_many<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn start_many(
+    sink: Arc<dyn EventSink>,
     state: Arc<AppState>,
     ids: Vec<String>,
     kind: &str,
@@ -1027,7 +1063,7 @@ pub async fn start_many<R: Runtime>(
         message: None,
         started_at: store::now_ms(),
     };
-    publish_bulk(&state, &app, bulk.clone());
+    publish_bulk(&state, &sink, bulk.clone());
 
     for (i, id) in order.iter().enumerate() {
         if bulk_cancelled(&state) {
@@ -1036,7 +1072,7 @@ pub async fn start_many<R: Runtime>(
         bulk.index = i;
         bulk.status.insert(id.clone(), "running".into());
         bulk.message = None;
-        publish_bulk(&state, &app, bulk.clone());
+        publish_bulk(&state, &sink, bulk.clone());
 
         let Some(spec) = specs.get(id).cloned() else {
             bulk.status.insert(id.clone(), "failed".into());
@@ -1044,11 +1080,11 @@ pub async fn start_many<R: Runtime>(
         };
         let name = spec.name.clone();
         let fail_fast = spec.policy.fail_fast;
-        let started = start(app.clone(), state.clone(), spec.clone()).await;
+        let started = start(sink.clone(), state.clone(), spec.clone()).await;
         if let Err(e) = started {
             bulk.status.insert(id.clone(), "failed".into());
             bulk.message = Some(format!("{name}：{e}"));
-            publish_bulk(&state, &app, bulk.clone());
+            publish_bulk(&state, &sink, bulk.clone());
             if fail_fast {
                 break;
             }
@@ -1068,13 +1104,13 @@ pub async fn start_many<R: Runtime>(
             Err(e) => {
                 bulk.status.insert(id.clone(), "failed".into());
                 bulk.message = Some(format!("{name}：{e}"));
-                publish_bulk(&state, &app, bulk.clone());
+                publish_bulk(&state, &sink, bulk.clone());
                 if fail_fast {
                     break;
                 }
             }
         }
-        publish_bulk(&state, &app, bulk.clone());
+        publish_bulk(&state, &sink, bulk.clone());
     }
 
     bulk.finished = true;
@@ -1086,12 +1122,12 @@ pub async fn start_many<R: Runtime>(
             }
         }
     }
-    publish_bulk(&state, &app, bulk.clone());
+    publish_bulk(&state, &sink, bulk.clone());
     Ok(())
 }
 
-pub async fn stop_many<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn stop_many(
+    sink: Arc<dyn EventSink>,
     state: Arc<AppState>,
     ids: Vec<String>,
     kind: &str,
@@ -1117,13 +1153,13 @@ pub async fn stop_many<R: Runtime>(
         message: None,
         started_at: store::now_ms(),
     };
-    publish_bulk(&state, &app, bulk.clone());
+    publish_bulk(&state, &sink, bulk.clone());
 
     for (i, id) in order.iter().enumerate() {
         bulk.index = i;
         bulk.status.insert(id.clone(), "running".into());
-        publish_bulk(&state, &app, bulk.clone());
-        let result = stop(&app, &state, id).await;
+        publish_bulk(&state, &sink, bulk.clone());
+        let result = stop(&sink, &state, id).await;
         let stopped = { state.sessions.lock().unwrap().get(id).cloned() };
         if let Some(session) = stopped {
             wait_until(
@@ -1140,10 +1176,10 @@ pub async fn stop_many<R: Runtime>(
         if let Err(e) = result {
             bulk.message = Some(e);
         }
-        publish_bulk(&state, &app, bulk.clone());
+        publish_bulk(&state, &sink, bulk.clone());
     }
     bulk.finished = true;
-    publish_bulk(&state, &app, bulk.clone());
+    publish_bulk(&state, &sink, bulk.clone());
     Ok(())
 }
 

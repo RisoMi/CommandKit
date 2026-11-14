@@ -23,9 +23,10 @@ Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Appli
 | `publish release` | 仅 tag 触发，把上面所有 zip / exe 挂到 GitHub Release |
 
 - 任意一次 run 的产物在 Actions 页面的 **Artifacts** 可直接下载（保留 30 天）。
-- Windows 的 `cargo test` 在 CI 上按用例逐个执行（`node scripts/ci-test.mjs --per-case`）：
-  同一个进程里连续创建多个 mock Tauri App 时，进程会被 `STATUS_CONTROL_C_EXIT` 中断；
-  逐个用例隔离后 11 个用例全部通过。这是 mock 运行时的限制，不影响应用本体（应用只创建一个 App）。
+- 进程监管（`supervisor`）只依赖极小的 `EventSink` 抽象，不依赖 Tauri 运行时：
+  生产用 `TauriSink(AppHandle)`，测试用 `NullSink`。这样 Windows 上测试二进制不会去链接
+  wry / WebView2 —— 早前用 `tauri::test` 的 mock 运行时会在 Windows 报
+  `0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND`，导致 runtime 套件根本没跑（假绿）。
 - 发布正式版本：`git tag v1.1.0 && git push origin v1.1.0`，等 workflow 完成后到 Releases 取包。
 
 ```bash
@@ -63,6 +64,7 @@ npm run app:build   # 发布构建
 cargo test --tests          # 11 个用例：拓扑排序 / 环境变量展开 / 进程树终止 / 原子写 + 备份
                             #           真起子 shell 抓 stdout+stderr / 非零退出→Failed /
                             #           健康检查门控 / stop 后整树死亡 / env 注入不影响宿主
+node scripts/ci-test.mjs    # CI 里跑的那套（失败行会转成 check-run annotation）
 node scripts/shots.mjs      # 用 Playwright 跑构建产物，输出 shots/01..08 截图（演示数据）
 ```
 

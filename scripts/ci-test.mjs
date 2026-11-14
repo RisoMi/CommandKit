@@ -65,6 +65,13 @@ let failed = 0;
 
 for (const target of targets) {
   const listing = cargo(['test', '--manifest-path', MP, '--test', target, '--', '--list']);
+  if (listing.code !== 0) {
+    // 二进制起不来（例如 Windows 上 STATUS_ENTRYPOINT_NOT_FOUND）时 --list 会失败，必须显式报错
+    failed += 1;
+    console.log(`FAIL ${target}::--list (${hex(listing.code)})`);
+    annotate(listing.out, listing.code, `${target}::--list`);
+    continue;
+  }
   const names = listing.out
     .split(/\r?\n/)
     .filter((l) => l.trim().endsWith(': test'))

@@ -9,7 +9,12 @@ use tauri::{AppHandle, Emitter, State};
 use crate::model::*;
 use crate::proc as procs;
 use crate::store;
-use crate::supervisor::{self, SpawnSpec};
+use crate::supervisor::{self, EventSink, SpawnSpec, TauriSink};
+
+/// 把 AppHandle 包成事件出口，supervisor 本身不依赖 Tauri 运行时
+fn sink_of(app: &AppHandle) -> Arc<dyn EventSink> {
+    Arc::new(TauriSink(app.clone()))
+}
 use crate::state::AppState;
 
 type St<'a> = State<'a, Arc<AppState>>;
@@ -290,20 +295,20 @@ pub async fn run_project(
 ) -> Result<(), String> {
     let shared = state.inner().clone();
     let spec = spec_for(&shared, &id)?;
-    supervisor::start(app, shared, spec).await
+    supervisor::start(sink_of(&app), shared, spec).await
 }
 
 #[tauri::command]
 pub async fn stop_project(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
     let shared = state.inner().clone();
-    supervisor::stop(&app, &shared, &id).await
+    supervisor::stop(&sink_of(&app), &shared, &id).await
 }
 
 #[tauri::command]
 pub async fn restart_project(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = supervisor::restart(&app, &shared, &id).await {
+        if let Err(e) = supervisor::restart(&sink_of(&app), &shared, &id).await {
             emit_toast(&app, "error", e);
         }
     });
@@ -324,7 +329,7 @@ pub async fn run_many(
     }
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = supervisor::start_many(app2.clone(), shared, ids, "run").await {
+        if let Err(e) = supervisor::start_many(sink_of(&app2), shared, ids, "run").await {
             emit_toast(&app2, "error", e);
         }
     });
@@ -340,7 +345,7 @@ pub async fn stop_many_cmd(
     let shared = state.inner().clone();
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = supervisor::stop_many(app2.clone(), shared, ids, "stop").await {
+        if let Err(e) = supervisor::stop_many(sink_of(&app2), shared, ids, "stop").await {
             emit_toast(&app2, "error", e);
         }
     });
@@ -361,11 +366,11 @@ pub async fn restart_many(
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let ids2 = ids.clone();
-        if let Err(e) = supervisor::stop_many(app2.clone(), shared.clone(), ids, "restart").await {
+        if let Err(e) = supervisor::stop_many(sink_of(&app2), shared.clone(), ids, "restart").await {
             emit_toast(&app2, "error", e);
             return;
         }
-        if let Err(e) = supervisor::start_many(app2.clone(), shared, ids2, "restart").await {
+        if let Err(e) = supervisor::start_many(sink_of(&app2), shared, ids2, "restart").await {
             emit_toast(&app2, "error", e);
         }
     });
@@ -375,7 +380,7 @@ pub async fn restart_many(
 #[tauri::command]
 pub fn cancel_bulk_cmd(app: AppHandle, state: St<'_>) -> Result<(), String> {
     let shared = state.inner().clone();
-    supervisor::cancel_bulk(&shared, &app);
+    supervisor::cancel_bulk(&shared, &sink_of(&app));
     let order = shared
         .bulk
         .lock()
@@ -386,7 +391,7 @@ pub fn cancel_bulk_cmd(app: AppHandle, state: St<'_>) -> Result<(), String> {
     if !order.is_empty() {
         let app2 = app.clone();
         tauri::async_runtime::spawn(async move {
-            let _ = supervisor::stop_many(app2, shared, order, "stop").await;
+            let _ = supervisor::stop_many(sink_of(&app2), shared, order, "stop").await;
         });
     }
     Ok(())
@@ -404,7 +409,7 @@ pub async fn run_template(app: AppHandle, state: St<'_>, id: String) -> Result<(
             .map(|t| supervisor::spec_from_template(t, shell))
             .ok_or_else(|| format!("未知模板：{id}"))?
     };
-    supervisor::start(app, shared, spec).await
+    supervisor::start(sink_of(&app), shared, spec).await
 }
 
 // ---------------------------------------------------------------- 终端

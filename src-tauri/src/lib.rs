@@ -57,7 +57,9 @@ pub fn run() {
                         .collect()
                 };
                 if !ids.is_empty() {
-                    let _ = supervisor::start_many(boot_app, boot_state, ids, "run").await;
+                    let sink: Arc<dyn supervisor::EventSink> =
+                        Arc::new(supervisor::TauriSink(boot_app));
+                    let _ = supervisor::start_many(sink, boot_state, ids, "run").await;
                 }
             });
 
@@ -86,7 +88,9 @@ pub fn run() {
                             inner.restart_pending = false;
                         }
                         let spec = session.spec.lock().unwrap().clone();
-                        let _ = supervisor::start(tick_app.clone(), tick_state.clone(), spec).await;
+                        let sink: Arc<dyn supervisor::EventSink> =
+                            Arc::new(supervisor::TauriSink(tick_app.clone()));
+                        let _ = supervisor::start(sink, tick_state.clone(), spec).await;
                     }
                 }
             });
