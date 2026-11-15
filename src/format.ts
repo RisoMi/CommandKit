@@ -44,3 +44,32 @@ export function portText(ports: number[]): string {
   if (!ports.length) return '';
   return ports.map((p) => `:${p}`).join(' ');
 }
+
+export type ShellKind = 'pwsh' | 'powershell' | 'cmd' | 'posix';
+
+/** 与 Rust 侧 shell_kind 保持同一规则 */
+export function shellKind(shell: string): ShellKind {
+  const base = (shell.split(/[\\/]/).pop() ?? shell).toLowerCase().replace(/\.exe$/, '');
+  if (base.includes('pwsh')) return 'pwsh';
+  if (base.includes('powershell')) return 'powershell';
+  if (base === 'cmd') return 'cmd';
+  return 'posix';
+}
+
+/** 给人看的「实际执行形式」，与 Rust shell_invocation 对齐 */
+export function shellInvocation(shell: string, command: string): string {
+  const cmd = command.length > 90 ? `${command.slice(0, 90)}…` : command;
+  const kind = shellKind(shell);
+  if (kind === 'cmd') return `${shell} /D /C "${cmd}"`;
+  if (kind === 'posix') return `${shell} -lc "${cmd}"`;
+  return `${shell} -NoProfile -Command "${cmd}"`;
+}
+
+export function shellShortName(shell: string): string {
+  const base = shell.split(/[\\/]/).pop() ?? shell;
+  const kind = shellKind(shell);
+  if (kind === 'pwsh') return 'PowerShell 7';
+  if (kind === 'powershell') return 'Windows PowerShell';
+  if (kind === 'cmd') return 'CMD';
+  return base.replace(/\.exe$/, '');
+}

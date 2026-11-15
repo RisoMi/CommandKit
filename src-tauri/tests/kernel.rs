@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use commandkit_lib::model::{Category, HealthCheck, Policy, Project};
-use commandkit_lib::supervisor::{expand, topo_order};
+use commandkit_lib::supervisor::{expand, shell_invocation, shell_kind, ShellKind, topo_order};
 
 fn project(id: &str, deps: &[&str]) -> Project {
     Project {
@@ -175,6 +175,45 @@ fn data_root_is_writable_probe() {
     let backups = std::fs::read_dir(dir.join("backup")).unwrap().count();
     assert_eq!(backups, 1, "覆盖前应保留一份备份");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn shell_kind_and_invocation_per_family() {
+    // 三类 shell 的参数形式必须区分开：cmd 用 /D /C，powershell 用 -NoProfile -Command，posix 用 -lc
+    assert_eq!(shell_kind("/bin/zsh"), ShellKind::Posix);
+    assert_eq!(shell_kind("/bin/bash"), ShellKind::Posix);
+    assert_eq!(
+        shell_invocation("/bin/zsh", "npm run dev"),
+        vec!["-lc".to_string(), "npm run dev".to_string()]
+    );
+
+    assert_eq!(shell_kind("cmd.exe"), ShellKind::Cmd);
+    assert_eq!(
+        shell_kind("C:\\Windows\\System32\\cmd.exe"),
+        ShellKind::Cmd,
+        "带路径的 cmd.exe 也要识别"
+    );
+    assert_eq!(
+        shell_invocation("cmd.exe", "npm run dev"),
+        vec!["/D".to_string(), "/C".to_string(), "npm run dev".to_string()]
+    );
+
+    assert_eq!(shell_kind("pwsh.exe"), ShellKind::Pwsh);
+    assert_eq!(
+        shell_kind("C:\\Program Files\\PowerShell\\7\\pwsh.exe"),
+        ShellKind::Pwsh
+    );
+    assert_eq!(
+        shell_invocation("pwsh.exe", "Get-Date"),
+        vec![
+            "-NoProfile".to_string(),
+            "-Command".to_string(),
+            "Get-Date".to_string()
+        ]
+    );
+
+    assert_eq!(shell_kind("powershell.exe"), ShellKind::PowerShell);
+    assert_eq!(shell_kind("PowerShell.exe"), ShellKind::PowerShell);
 }
 
 #[test]

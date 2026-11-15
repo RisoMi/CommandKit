@@ -295,6 +295,17 @@ pub struct BulkView {
     pub started_at: u64,
 }
 
+/// 可选 shell（设置 / 项目编辑器共用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOption {
+    pub value: String,
+    pub label: String,
+    /// "pwsh" | "powershell" | "cmd" | "posix"
+    pub kind: String,
+    pub available: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -304,5 +315,6 @@ pub struct AppInfo {
     pub writable: bool,
     pub portable: bool,
     pub shell: String,
+    pub shells: Vec<ShellOption>,
     pub webview: String,
 }

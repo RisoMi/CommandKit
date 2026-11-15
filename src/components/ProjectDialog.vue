@@ -7,6 +7,7 @@ import {
   saveProjectFromEditor,
   state,
 } from '../store';
+import { shellInvocation } from '../format';
 import type { Project } from '../types';
 
 const draft = reactive<Project>(JSON.parse(JSON.stringify(editor.project)) as Project);
@@ -22,12 +23,30 @@ const valid = computed(
   () => draft.name.trim() !== '' && draft.command.trim() !== '' && draft.workdir.trim() !== ''
 );
 
-const shellHint = computed(() => {
-  const shell = draft.shell || state.settings?.shell || (state.info?.platform === 'windows' ? 'pwsh.exe' : '/bin/zsh');
-  return state.info?.platform === 'windows'
-    ? `${shell} -NoProfile -Command "${draft.command.slice(0, 60)}${draft.command.length > 60 ? '…' : ''}"`
-    : `${shell} -lc "${draft.command.slice(0, 60)}${draft.command.length > 60 ? '…' : ''}"`;
+const CUSTOM_SHELL = '__custom__';
+const shells = computed(() => state.info?.shells ?? []);
+
+const defaultShell = computed(
+  () => state.settings?.shell || (state.info?.platform === 'windows' ? 'pwsh.exe' : '/bin/zsh')
+);
+
+// '' = 跟随设置；已知值 = 指定 shell；CUSTOM_SHELL = 自定义路径
+const shellSel = ref<string>(
+  !draft.shell
+    ? ''
+    : shells.value.some((s) => s.value === draft.shell)
+      ? draft.shell
+      : CUSTOM_SHELL
+);
+const customShell = ref<string>(draft.shell && shellSel.value === CUSTOM_SHELL ? draft.shell : '');
+
+const effectiveShell = computed(() => {
+  if (shellSel.value === '') return defaultShell.value;
+  if (shellSel.value === CUSTOM_SHELL) return customShell.value.trim() || defaultShell.value;
+  return shellSel.value;
 });
+
+const shellHint = computed(() => shellInvocation(effectiveShell.value, draft.command));
 
 const otherProjects = computed(() => state.projects.filter((p) => p.id !== draft.id));
 
@@ -57,6 +76,12 @@ async function submit() {
   for (const row of envRows.value) {
     if (row.k.trim()) env[row.k.trim()] = row.v;
   }
+  draft.shell =
+    shellSel.value === ''
+      ? null
+      : shellSel.value === CUSTOM_SHELL
+        ? customShell.value.trim() || null
+        : shellSel.value;
   draft.env = env;
   draft.ports = portsText.value
     .split(/[,\s]+/)
@@ -130,8 +155,19 @@ function drop() {
             <input v-model="portsText" placeholder="8000, 8001" />
           </div>
           <div class="field">
-            <label>覆盖 shell（可选）</label>
-            <input v-model="draft.shell" placeholder="留空使用默认" />
+            <label>执行 shell</label>
+            <select v-model="shellSel">
+              <option value="">跟随设置（{{ defaultShell }}）</option>
+              <option v-for="s in shells" :key="s.value" :value="s.value">
+                {{ s.label }}{{ s.available ? '' : '（未安装）' }}
+              </option>
+              <option :value="CUSTOM_SHELL">自定义路径…</option>
+            </select>
+            <input
+              v-if="shellSel === CUSTOM_SHELL"
+              v-model="customShell"
+              placeholder="cmd.exe 或 C:\Tools\msys64\usr\bin\bash.exe"
+            />
           </div>
         </div>
 

@@ -282,6 +282,57 @@ fn expand_system(input: &str) -> String {
     out
 }
 
+/// shell 家族：决定命令行参数，而不是靠平台硬编码
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellKind {
+    Pwsh,
+    PowerShell,
+    Cmd,
+    Posix,
+}
+
+impl ShellKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShellKind::Pwsh => "pwsh",
+            ShellKind::PowerShell => "powershell",
+            ShellKind::Cmd => "cmd",
+            ShellKind::Posix => "posix",
+        }
+    }
+}
+
+pub fn shell_kind(shell: &str) -> ShellKind {
+    let base = shell
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    let base = base.trim_end_matches(".exe");
+    if base.contains("pwsh") {
+        ShellKind::Pwsh
+    } else if base.contains("powershell") {
+        ShellKind::PowerShell
+    } else if base == "cmd" {
+        ShellKind::Cmd
+    } else {
+        ShellKind::Posix
+    }
+}
+
+/// 按 shell 家族给出调用参数（抽出来便于单测，也便于 UI 展示「实际执行形式」）
+pub fn shell_invocation(shell: &str, command: &str) -> Vec<String> {
+    match shell_kind(shell) {
+        // /D 关闭 cmd 的 AutoRun，避免注册表里的启动脚本污染环境
+        ShellKind::Cmd => vec!["/D".into(), "/C".into(), command.into()],
+        ShellKind::Pwsh | ShellKind::PowerShell => {
+            vec!["-NoProfile".into(), "-Command".into(), command.into()]
+        }
+        // -l：登录 shell，确保 Finder 启动的应用也能拿到用户 PATH
+        ShellKind::Posix => vec!["-lc".into(), command.into()],
+    }
+}
+
 fn resolve_shell(spec: &SpawnSpec, shell_setting: &str) -> String {
     spec.shell
         .clone()
@@ -308,11 +359,8 @@ fn build_command(spec: &SpawnSpec, shell: &str) -> Result<Command, String> {
     }
 
     let mut cmd = Command::new(shell);
-    if cfg!(windows) {
-        cmd.arg("-NoProfile").arg("-Command").arg(&spec.command);
-    } else {
-        // -l：登录 shell，确保 Finder 启动的应用也能拿到用户 PATH
-        cmd.arg("-lc").arg(&spec.command);
+    for arg in shell_invocation(shell, &spec.command) {
+        cmd.arg(arg);
     }
     cmd.current_dir(&workdir);
     cmd.stdin(Stdio::piped())

@@ -125,6 +125,13 @@ export interface BulkView {
   startedAt: number;
 }
 
+export interface ShellOption {
+  value: string;
+  label: string;
+  kind: 'pwsh' | 'powershell' | 'cmd' | 'posix';
+  available: boolean;
+}
+
 export interface AppInfo {
   platform: string;
   version: string;
@@ -132,6 +139,7 @@ export interface AppInfo {
   writable: boolean;
   portable: boolean;
   shell: string;
+  shells: ShellOption[];
   webview: string;
 }
 

@@ -35,11 +35,13 @@ const server = http.createServer(async (req, res) => {
 await new Promise((r) => server.listen(4599, '127.0.0.1', r));
 
 const browser = await chromium.launch();
-const page = await browser.newPage({
+const context = await browser.newContext({
   viewport: { width: 1360, height: 880 },
   deviceScaleFactor: 2,
   colorScheme: 'dark',
+  permissions: ['clipboard-read', 'clipboard-write'],
 });
+const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => {
@@ -66,6 +68,14 @@ await page.waitForTimeout(400);
 const termText = await page.locator('.term').first().innerText();
 if (!termText.includes('fishery-agent')) {
   throw new Error(`切换标签后终端内容未更新：${termText.slice(0, 120)}`);
+}
+
+// 复制输出：剪贴板里必须拿到该会话的内容（且不含 ANSI 转义）
+await page.getByRole('button', { name: '复制输出' }).click();
+await page.waitForTimeout(300);
+const clip = await page.evaluate(() => navigator.clipboard.readText());
+if (!clip.includes('fishery-agent') || clip.includes('\u001b[')) {
+  throw new Error(`复制内容不正确：${clip.slice(0, 120)}`);
 }
 await page.screenshot({ path: join(OUT, '03b-term-switch.png') });
 

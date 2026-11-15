@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue';
 import Terminal from '../components/Terminal.vue';
 import { api } from '../api';
+import { copyText } from '../clipboard';
 import { fmtMem, statusText } from '../format';
 import {
   clearTerm,
@@ -11,6 +12,7 @@ import {
   runProject,
   state,
   stopProject,
+  termText,
   toast,
 } from '../store';
 import type { SessionView } from '../types';
@@ -95,6 +97,23 @@ const queue = computed<QueueRow[]>(() => {
   return rows;
 });
 
+/** 有选中就复制选中，否则复制整段输出（已去掉 ANSI 转义） */
+async function copyOutput() {
+  if (!active.value) return;
+  const selected = (window.getSelection()?.toString() ?? '').trim();
+  const text = selected || termText(active.value);
+  if (!text.trim()) {
+    toast('warn', '这个会话还没有输出');
+    return;
+  }
+  const ok = await copyText(text);
+  if (!ok) {
+    toast('error', '复制失败，请手动选中后按 ⌘/Ctrl + C');
+    return;
+  }
+  toast('ok', selected ? '已复制选中内容' : `已复制全部输出（${text.split('\n').length} 行）`);
+}
+
 async function exportLog() {
   if (!active.value) return;
   try {
@@ -167,6 +186,7 @@ async function openExternal() {
             </span>
             <span class="mono muted">{{ cwdText }}</span>
             <span class="pill" :class="activeSession?.status">{{ statusText(activeSession?.status ?? 'stopped') }}</span>
+            <span class="muted" style="font-size: 10px">可选中复制</span>
             <span v-if="state.metrics[active ?? '']" class="mono muted">
               CPU {{ (state.metrics[active ?? ''].cpu).toFixed(1) }}% ·
               {{ fmtMem(state.metrics[active ?? ''].mem) }}
@@ -181,6 +201,7 @@ async function openExternal() {
               停止当前
             </button>
             <button class="btn sm" :disabled="!active" @click="openExternal">打开外部终端</button>
+            <button class="btn sm" :disabled="!active" @click="copyOutput">复制输出</button>
             <button class="btn sm" :disabled="!active" @click="active && clearTerm(active)">清空输出</button>
             <button
               class="btn sm"

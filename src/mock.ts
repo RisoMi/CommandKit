@@ -298,7 +298,12 @@ const logs: Record<string, LogChunk[]> = {
     { seq: 8, stream: 'out', data: '\x1b[32m[13:03:12] INFO  Upstream ready, health check passed\x1b[0m\n' },
     { seq: 9, stream: 'out', data: '\x1b[90m[13:04:02] INFO  127.0.0.1:51234 - "GET /health 200 OK"\x1b[0m\n' },
   ],
-  'fishery-web': [],
+  'fishery-web': [
+    { seq: 1, stream: 'out', data: '\x1b[90m# 独立会话 · cwd=~/work/ocean-fishery-code/web · env 由 Rust 注入\x1b[0m\n' },
+    { seq: 2, stream: 'out', data: '\x1b[32m$\x1b[0m npm run dev -- --port 5173\n' },
+    { seq: 3, stream: 'out', data: '\n\x1b[32m  VITE v6.4.6\x1b[0m  ready in \x1b[33m412\x1b[0m ms\n' },
+    { seq: 4, stream: 'out', data: '  \x1b[32m➜\x1b[0m  Local:   \x1b[36mhttp://localhost:5173/\x1b[0m\n' },
+  ],
 };
 
 let bulk: BulkView | null = null;
@@ -307,11 +312,17 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.1.0',
+      version: '1.1.3',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
       shell: settings.shell,
+      shells: [
+        { value: '/bin/zsh', label: 'zsh（macOS 默认）', kind: 'posix', available: true },
+        { value: '/bin/bash', label: 'bash', kind: 'posix', available: true },
+        { value: '/bin/sh', label: 'sh', kind: 'posix', available: true },
+        { value: 'pwsh', label: 'PowerShell 7（pwsh，若已安装）', kind: 'pwsh', available: false },
+      ],
       webview: 'WKWebView',
     },
     projects: JSON.parse(JSON.stringify(projects)),

@@ -108,10 +108,18 @@ data\
 
 每个项目 / 模板各起一个子 shell，互不共享环境：
 
-| 平台 | 实际命令 |
-| --- | --- |
-| macOS | `/bin/zsh -lc "<command>"`（登录 shell，确保 Finder 启动时也能拿到用户 PATH） |
-| Windows | `pwsh.exe -NoProfile -Command "<command>"`（`CREATE_NO_WINDOW \| CREATE_NEW_PROCESS_GROUP`） |
+shell 家族决定参数形式（`supervisor::shell_invocation`，有单测覆盖）：
+
+| 家族 | 调用形式 | 说明 |
+| --- | --- | --- |
+| CMD | `cmd.exe /D /C "<command>"` | `/D` 关掉 AutoRun，避免注册表启动脚本污染环境 |
+| PowerShell 7 / Windows PowerShell | `<shell> -NoProfile -Command "<command>"` | 不加载 profile |
+| POSIX（zsh / bash / sh） | `<shell> -lc "<command>"` | 登录 shell，确保 Finder 启动时也能拿到用户 PATH |
+
+- **默认 shell**：设置 → 运行 → 默认 shell（下拉，Windows 给 pwsh / powershell / cmd，macOS 给 zsh / bash / sh，也可填自定义路径）。
+- **项目级覆盖**：编辑项目 → 执行 shell，可选「跟随设置」或单独指定；模板同理。
+
+Windows 上 `pwsh.exe` 不存在时会自动回退 `powershell.exe` 并在终端里提示一行。
 
 - `cwd` = 项目 `workdir`（支持 `~` 展开；目录不存在直接报错，不静默回退）。
 - `stdio` 全 piped：stdout / stderr 分流读取，stdin 可写（终端底部输入行）。
@@ -170,7 +178,8 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 ## 4. 进程监管（09 屏）
 
 - 指标：sysinfo 进程表每 `refreshMs`（默认 2s）刷新一次，按会话根 PID 聚合整棵进程树的 CPU / 内存 / 子进程数，经 `ck:metrics` 推给前端。
-- 详情：进程树（PID / 名称 / 命令行）、环境变量（`SECRET|TOKEN|PASSWORD|KEY` 自动脱敏）、端口监听状态、日志尾部 14 行。
+- 详情：进程树（PID / 名称 / 命令行）、环境变量（`SECRET|TOKEN|PASSWORD|KEY` 自动脱敏）、端口监听状态、日志尾部 14 行（可一键复制）。
+- 终端输出可直接鼠标选中复制（⌘/Ctrl + C），也可点「复制输出」：有选中复制选中，无选中复制整段（已剥离 ANSI 转义）。
 - 端口预检：启动前若端口已被占用，终端里先输出一条 `[preflight] 端口 xxxx 已被占用（PID …）`（macOS 用 `lsof`，Windows 用 `netstat -ano`），不阻断启动。
 
 ---

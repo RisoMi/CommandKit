@@ -52,6 +52,7 @@ fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
         writable: state.writable,
         portable: cfg!(windows),
         shell: settings.shell.clone(),
+        shells: shell_candidates(),
         webview: if cfg!(windows) {
             "WebView2".into()
         } else if cfg!(target_os = "macos") {
@@ -70,6 +71,31 @@ fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
         metrics,
         bulk,
     }
+}
+
+/// 设置 / 项目编辑器里的 shell 候选（按平台给，附带是否已安装）
+fn shell_candidates() -> Vec<ShellOption> {
+    let mut out: Vec<ShellOption> = Vec::new();
+    let push = |out: &mut Vec<ShellOption>, value: &str, label: &str, kind: &str| {
+        out.push(ShellOption {
+            value: value.to_string(),
+            label: label.to_string(),
+            kind: kind.to_string(),
+            available: store::command_exists(value),
+        });
+    };
+
+    if cfg!(windows) {
+        push(&mut out, "pwsh.exe", "PowerShell 7（pwsh）", "pwsh");
+        push(&mut out, "powershell.exe", "Windows PowerShell（powershell）", "powershell");
+        push(&mut out, "cmd.exe", "CMD（cmd）", "cmd");
+    } else {
+        push(&mut out, "/bin/zsh", "zsh（macOS 默认）", "posix");
+        push(&mut out, "/bin/bash", "bash", "posix");
+        push(&mut out, "/bin/sh", "sh", "posix");
+        push(&mut out, "pwsh", "PowerShell 7（pwsh，若已安装）", "pwsh");
+    }
+    out
 }
 
 fn gen_id(prefix: &str) -> String {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { api } from '../api';
 import { apply, state, toast } from '../store';
+import { shellInvocation, shellKind } from '../format';
 import type { Settings } from '../types';
 
 const form = reactive<Settings>({
@@ -20,6 +21,32 @@ watch(
   },
   { immediate: true, deep: true }
 );
+
+const shells = computed(() => state.info?.shells ?? []);
+const CUSTOM = '__custom__';
+const customMode = ref(false);
+
+/** 选中的值不在候选里就落到「自定义」 */
+const shellChoice = computed<string>({
+  get: () => {
+    if (customMode.value) return CUSTOM;
+    return shells.value.some((s) => s.value === form.shell) ? form.shell : CUSTOM;
+  },
+  set: (v) => {
+    if (v === CUSTOM) {
+      customMode.value = true;
+    } else {
+      customMode.value = false;
+      form.shell = v;
+    }
+  },
+});
+
+const invocation = computed(() => shellInvocation(form.shell || 'shell', 'npm run dev'));
+const kindLabel = computed(() => {
+  const k = shellKind(form.shell || '');
+  return { pwsh: 'PowerShell 7', powershell: 'Windows PowerShell', cmd: 'CMD', posix: 'POSIX shell' }[k];
+});
 
 async function save() {
   try {
@@ -85,11 +112,21 @@ async function exportSnapshot() {
     <div class="card">
       <div class="card-h"><h3>运行</h3></div>
       <div class="body">
-        <div class="field" style="flex: 1">
+        <div class="field" style="flex: 1.4">
           <label>默认 shell</label>
-          <input v-model="form.shell" placeholder="/bin/zsh 或 pwsh.exe" />
+          <select v-model="shellChoice">
+            <option v-for="s in shells" :key="s.value" :value="s.value">
+              {{ s.label }}{{ s.available ? '' : '（未安装）' }}
+            </option>
+            <option :value="CUSTOM">自定义路径…</option>
+          </select>
+          <input
+            v-if="shellChoice === CUSTOM"
+            v-model="form.shell"
+            placeholder="C:\Program Files\PowerShell\7\pwsh.exe 或 /bin/zsh"
+          />
           <span class="hint">
-            每个项目 / 模板在该 shell 下启动独立子进程：{{ state.info?.platform === 'windows' ? 'pwsh -NoProfile -Command' : 'zsh -lc' }}。
+            家族：{{ kindLabel }} · 实际执行：<code style="font-family: var(--mono)">{{ invocation }}</code>
           </span>
         </div>
         <div class="field" style="flex: 0 0 160px">

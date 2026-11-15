@@ -1179,6 +1179,17 @@ table.p td.mono {
   }
 }
 
+/* 终端 / 日志区允许选中复制（body 默认禁选） */
+.term,
+.term *,
+.tree,
+.tree *,
+.logtail,
+.logtail * {
+  user-select: text;
+  cursor: text;
+}
+
 /* 终端 ANSI 颜色 */
 .a-b {
   font-weight: 600;

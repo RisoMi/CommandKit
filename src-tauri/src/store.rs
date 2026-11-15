@@ -160,6 +160,45 @@ fn prune_backups(dir: &Path, stem: &str, keep: usize) {
     }
 }
 
+/// 命令是否可执行（PATH 查找；绝对路径直接看存在性）
+pub fn command_exists(bin: &str) -> bool {
+    let trimmed = bin.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() || trimmed.contains('/') || trimmed.contains('\\') {
+        return path.is_file();
+    }
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
+            .split(';')
+            .map(|e| e.to_ascii_lowercase())
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    for dir in std::env::split_paths(&paths) {
+        for ext in &exts {
+            let mut candidate = dir.join(trimmed);
+            if !ext.is_empty() && !trimmed.to_ascii_lowercase().ends_with(ext.as_str()) {
+                candidate = dir.join(format!("{trimmed}{ext}"));
+            }
+            if candidate.is_file() {
+                return true;
+            }
+        }
+        if dir.join(trimmed).is_file() {
+            return true;
+        }
+    }
+    false
+}
+
 /// 单实例文件锁：进程退出自动释放；防止两个实例并发写 templates.json。
 pub fn acquire_lock(dir: &Path) -> Option<File> {
     use fs2::FileExt;

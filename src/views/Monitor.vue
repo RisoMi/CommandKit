@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
+import { copyText } from '../clipboard';
 import { fmtCpu, fmtMem, fmtUptime, statusText } from '../format';
 import { askConfirm, batchIds, categoryName, openBulk, state, toast } from '../store';
 import type { ProcessDetail, ProcNode, SessionView } from '../types';
@@ -113,6 +114,16 @@ const treeRows = computed<TreeRow[]>(() => {
   };
   return nodes.map((n) => ({ depth: depthOf(n), node: n }));
 });
+
+async function copyTail() {
+  const text = (detail.value?.logTail ?? []).join('\n');
+  if (!text.trim()) {
+    toast('warn', '暂无日志可复制');
+    return;
+  }
+  const ok = await copyText(text);
+  toast(ok ? 'ok' : 'error', ok ? '已复制日志尾部' : '复制失败');
+}
 
 async function exportSnapshot() {
   try {
@@ -241,6 +252,7 @@ function dotOf(s: SessionView): string {
         <div class="card-h">
           <h3>实时日志尾部</h3>
           <span class="spacer"></span>
+          <span class="link" @click="copyTail">复制</span>
           <span class="link" @click="selected && openBulk(selected)">打开多终端</span>
         </div>
         <div class="tree logtail">
