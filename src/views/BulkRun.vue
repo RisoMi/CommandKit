@@ -21,11 +21,53 @@ const sessions = computed(() =>
   Object.values(state.sessions).filter((s) => s.kind === 'project' || s.kind === 'template')
 );
 
+interface TabItem {
+  id: string;
+  name: string;
+  status: string;
+  started: boolean;
+  batch: boolean;
+}
+
+/**
+ * 页签 = 本次批量队列（含尚未启动的项目，占位可见）+ 其它已有会话。
+ * 之前只按「已存在会话」渲染，一键运行时后面的项目还没启动就没有页签，无法切换。
+ */
+const tabs = computed<TabItem[]>(() => {
+  const seen = new Set<string>();
+  const out: TabItem[] = [];
+
+  const push = (id: string, batch: boolean) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const s = state.sessions[id];
+    const p = projectById(id);
+    if (!s && !p) return;
+    out.push({
+      id,
+      name: s?.name ?? p?.name ?? id,
+      status: s?.status ?? 'stopped',
+      started: !!s,
+      batch,
+    });
+  };
+
+  // 1) 队列中的项目（进行中时也包含尚未启动的）
+  const b = state.bulk;
+  if (b && !b.finished) {
+    for (const id of b.order) push(id, true);
+  }
+  // 2) 已有会话（模板 / 单跑的项目 / 已完成的批量）
+  for (const s of sessions.value) push(s.id, false);
+
+  return out;
+});
+
 const active = computed(() => {
   const id = state.activeSession;
   if (id && (state.sessions[id] || projectById(id))) return id;
-  const running = sessions.value.find((s) => s.status === 'running');
-  return running?.id ?? sessions.value[0]?.id ?? null;
+  const running = tabs.value.find((t) => t.status === 'running');
+  return running?.id ?? tabs.value[0]?.id ?? null;
 });
 
 const activeProject = computed(() => (active.value ? projectById(active.value) : undefined));
@@ -44,6 +86,21 @@ function pick(id: string) {
   state.activeSession = id;
   hydrateTerm(id);
 }
+
+/** 空白终端的提示：区分「还没启动」和「启动了但没输出」 */
+const emptyHint = computed(() => {
+  const id = active.value;
+  if (!id) return '还没有会话。回到「项目工作台」点「一键运行」或单个「运行」。';
+  const tab = tabs.value.find((t) => t.id === id);
+  if (!tab) return undefined;
+  if (!tab.started) {
+    return '该项目还没启动 —— 等批量队列执行到它，或点下方「启动会话」。';
+  }
+  if (tab.status === 'stopped' || tab.status === 'exited' || tab.status === 'failed') {
+    return `该会话${statusText(tab.status)}，点下方「启动会话」可重新运行（当前没有输出）。`;
+  }
+  return undefined;
+});
 
 const bulk = computed(() => state.bulk);
 const bulkPct = computed(() => {
@@ -167,15 +224,19 @@ async function openExternal() {
     <template v-if="sessions.length || active">
       <div class="tabs">
         <div
-          v-for="s in sessions"
-          :key="s.id"
+          v-for="t in tabs"
+          :key="t.id"
           class="tab"
-          :class="{ active: active === s.id }"
-          @click="pick(s.id)"
+          :class="{ active: active === t.id, pending: !t.started }"
+          :title="t.started ? t.name : `${t.name}（尚未启动）`"
+          @click="pick(t.id)"
         >
-          <i class="dot" :class="s.status"></i>
-          {{ s.name }}
+          <i class="dot" :class="t.status"></i>
+          <span class="tabname">{{ t.name }}</span>
         </div>
+        <span v-if="!tabs.length" class="muted" style="font-size: 11px; padding: 7px 2px">
+          本次没有项目
+        </span>
       </div>
 
       <div class="runbody">
@@ -193,7 +254,7 @@ async function openExternal() {
             </span>
           </div>
 
-          <Terminal :id="active ?? ''" />
+          <Terminal :id="active ?? ''" :empty-hint="emptyHint" />
 
           <div class="flex wrap" style="margin-top: 8px">
             <button class="btn sm" :disabled="!active" @click="active && restartProject(active)">重启当前</button>
@@ -286,6 +347,15 @@ async function openExternal() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tabname {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab.pending {
+  opacity: 0.6;
 }
 .qhint {
   margin-top: auto;

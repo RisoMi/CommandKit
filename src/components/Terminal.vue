@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
 import { normalizeCr, stripAnsi } from '../ansi';
+import { statusText } from '../format';
 import { state, term, toast } from '../store';
 
 const props = defineProps<{ id: string; emptyHint?: string }>();
@@ -77,8 +78,8 @@ async function send() {
         placeholder="向该会话 stdin 输入内容后回车（Ctrl+C 请用「停止」按钮）"
         @keyup.enter="send"
       />
-      <span v-if="state.sessions[id]?.status !== 'running'" class="muted" style="font-size: 10.5px">
-        {{ state.sessions[id] ? state.sessions[id].status : '未启动' }}
+      <span v-if="state.sessions[id]?.status !== 'running'" class="term-status muted">
+        {{ state.sessions[id] ? statusText(state.sessions[id].status) : '未启动' }}
       </span>
     </div>
   </div>
@@ -98,6 +99,11 @@ async function send() {
 }
 .pending {
   opacity: 0.7;
+}
+.term-status {
+  font-size: 10.5px;
+  white-space: nowrap;
+  flex: none;
 }
 .term-empty {
   color: var(--t4);

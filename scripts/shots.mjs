@@ -58,7 +58,23 @@ await page.getByRole('button', { name: '一键运行' }).click();
 await page.waitForTimeout(1500);
 const autoSwitched = await page.getByText('批量运行 · 多终端').count();
 if (!autoSwitched) throw new Error('一键运行后没有自动切到批量运行页');
+// 一键运行时，队列里的项目即使还没启动也必须出现在页签里（否则切不过去）
+const tabCount = await page.locator('.tab').count();
+if (tabCount < 3) throw new Error(`批量运行页签数量不对：${tabCount}`);
 await page.screenshot({ path: join(OUT, '02-bulk.png') });
+
+// 点最后一个页签：命令行与终端内容必须跟着切换
+const beforeCmd = await page.locator('.cmdbar .cmdtext').first().innerText();
+await page.locator('.tab').last().click();
+await page.waitForTimeout(300);
+const afterCmd = await page.locator('.cmdbar .cmdtext').first().innerText();
+if (beforeCmd === afterCmd) {
+  throw new Error(`切换页签后命令行没有变化：${afterCmd}`);
+}
+await page.screenshot({ path: join(OUT, '02b-tab-switch.png') });
+// 回到第一个页签继续后续断言
+await page.locator('.tab').first().click();
+await page.waitForTimeout(200);
 await page.waitForTimeout(2600);
 await page.screenshot({ path: join(OUT, '03-bulk-done.png') });
 
