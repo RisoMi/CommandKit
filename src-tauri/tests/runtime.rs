@@ -194,6 +194,35 @@ async fn env_is_injected_without_touching_system() {
     );
 }
 
+/// CMD 与 POSIX shell 的调用形式不同（/D /C vs -lc），这里真跑一条命令验证选中的 shell 生效
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_shell_override_is_used() {
+    let sink = sink();
+    let state = make_state("shell");
+    let id = "t-shell";
+
+    let (shell, command, expect) = if cfg!(windows) {
+        ("cmd.exe", "echo ck-cmd-ok", "ck-cmd-ok")
+    } else {
+        ("/bin/bash", "echo ck-bash-ok", "ck-bash-ok")
+    };
+
+    let mut s = spec(id, command, None);
+    s.shell = Some(shell.to_string());
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+    assert!(
+        wait_status(&state, id, Status::Stopped, 15000).await,
+        "指定 shell 后应正常跑完，实际：{:?}",
+        supervisor::get_session(&state, id).map(|s| s.view().status)
+    );
+
+    let text: String = supervisor::log_snapshot(&state, id)
+        .into_iter()
+        .map(|c| c.data)
+        .collect();
+    assert!(text.contains(expect), "{shell} 应执行命令：{text}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_workdir_reports_error_and_keeps_state_clean() {
     let sink = sink();

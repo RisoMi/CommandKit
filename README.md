@@ -61,7 +61,8 @@ npm run app:build   # 发布构建
 ### 已验证项（本机 macOS 实测）
 
 ```bash
-cargo test --tests          # 11 个用例：拓扑排序 / 环境变量展开 / 进程树终止 / 原子写 + 备份
+cargo test --tests          # 13 个用例：拓扑排序 / 环境变量展开 / 进程树终止 / 原子写 + 备份 /
+                            #            shell 参数形式（cmd /D /C、powershell -Command、posix -lc）
                             #           真起子 shell 抓 stdout+stderr / 非零退出→Failed /
                             #           健康检查门控 / stop 后整树死亡 / env 注入不影响宿主
 node scripts/ci-test.mjs    # CI 里跑的那套（失败行会转成 check-run annotation）
