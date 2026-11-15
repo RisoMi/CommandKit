@@ -108,6 +108,43 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: join(OUT, '08-categories.png') });
 await page.keyboard.press('Escape');
 
+// 浅色系统背景下 WebView 的原生控件会变白 —— 这里强制 light 再验一遍表单控件仍是深色
+const lightCtx = await browser.newContext({
+  viewport: { width: 1360, height: 880 },
+  deviceScaleFactor: 2,
+  colorScheme: 'light',
+});
+const lightPage = await lightCtx.newPage();
+await lightPage.goto('http://127.0.0.1:4599/', { waitUntil: 'networkidle' });
+await lightPage.waitForTimeout(800);
+await lightPage.getByRole('button', { name: '+ 新建项目' }).click();
+await lightPage.waitForTimeout(400);
+await lightPage.screenshot({ path: join(OUT, '09-dialog-light.png') });
+
+const probe = await lightPage.evaluate(() => {
+  const input = document.querySelector('.modal input:not([type="checkbox"])');
+  const select = document.querySelector('.modal select');
+  return {
+    input: input ? getComputedStyle(input).backgroundColor : 'none',
+    select: select ? getComputedStyle(select).backgroundColor : 'none',
+    appearance: select ? getComputedStyle(select).appearance : 'none',
+  };
+});
+const dark = (v) => v === 'rgb(16, 18, 20)';
+if (!dark(probe.input) || !dark(probe.select)) {
+  throw new Error(`浅色环境下表单控件不是深色：${JSON.stringify(probe)}`);
+}
+console.log('form controls stay dark in light scheme:', JSON.stringify(probe));
+
+
+// 设置页（下拉最多）也在浅色环境下留一张
+await lightPage.keyboard.press('Escape');
+await lightPage.getByText('设置', { exact: true }).first().click();
+await lightPage.waitForTimeout(400);
+await lightPage.screenshot({ path: join(OUT, '10-settings-light.png') });
+
+await lightCtx.close();
+
 console.log(errors.length ? `console errors:\n${errors.join('\n')}` : 'no console errors');
 await browser.close();
 server.close();
