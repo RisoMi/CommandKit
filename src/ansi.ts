@@ -28,6 +28,20 @@ const BASIC: Record<number, string> = {
   97: '#f2f3f4',
 };
 
+/**
+ * 归一化一行里的回车符：
+ * - `\r\n` 的行尾 `\r` 直接丢弃（否则整行会被误判为「空进度条」）
+ * - 进度条式的 `50%\r60%\r` 只保留最后一次刷新的内容
+ */
+export function normalizeCr(raw: string): string {
+  if (!raw.includes('\r')) return raw;
+  const parts = raw.split('\r');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i] !== '') return parts[i];
+  }
+  return '';
+}
+
 export function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "");
 }

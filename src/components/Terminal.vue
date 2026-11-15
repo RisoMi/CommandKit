@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
+import { normalizeCr, stripAnsi } from '../ansi';
 import { state, term, toast } from '../store';
 
 const props = defineProps<{ id: string; emptyHint?: string }>();
@@ -11,7 +12,8 @@ const input = ref('');
 
 const t = computed(() => term[props.id]);
 const lineCount = computed(() => t.value?.lines.length ?? 0);
-const pending = computed(() => t.value?.pending ?? '');
+// 尾部未换行的内容（进度条等）同样要处理 \r 与 ANSI，避免显示成乱码
+const pending = computed(() => stripAnsi(normalizeCr(t.value?.pending ?? '')));
 
 function scrollBottom() {
   const el = box.value;

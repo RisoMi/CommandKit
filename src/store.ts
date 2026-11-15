@@ -1,7 +1,7 @@
 import { computed, reactive } from 'vue';
 import { listen } from './bridge';
 import { api } from './api';
-import { parseAnsi, stripAnsi, type Seg } from './ansi';
+import { normalizeCr, parseAnsi, stripAnsi, type Seg } from './ansi';
 import type {
   AppInfo,
   BulkView,
@@ -134,8 +134,8 @@ function lineCap(): number {
 }
 
 function pushLine(t: TermState, raw: string) {
-  // 进度条常用 \r 原地刷新，只保留最后一段
-  const clean = raw.includes('\r') ? raw.slice(raw.lastIndexOf('\r') + 1) : raw;
+  // Windows 输出是 \r\n：切行后残留的 \r 必须丢掉，否则整行会被当成空的进度条刷新
+  const clean = normalizeCr(raw);
   t.lines.push({ n: t.counter++, segs: clean.trim() === '' ? [] : parseAnsi(clean) });
   const cap = lineCap();
   if (t.lines.length > cap + 200) {

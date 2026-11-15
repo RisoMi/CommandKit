@@ -312,7 +312,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.1.4',
+      version: '1.1.5',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -343,9 +343,11 @@ function setSession(id: string, patch: Partial<SessionView>) {
 }
 
 function pushLog(id: string, text: string) {
-  const chunk: LogChunk = { seq: (logs[id]?.length ?? 0) + 1, stream: 'out', data: text };
+  // 故意用 CRLF：模拟 Windows 子进程输出，回归「\r 被当成进度条刷新而吞掉整行」的问题
+  const crlf = text.replace(/\r?\n/g, '\r\n');
+  const chunk: LogChunk = { seq: (logs[id]?.length ?? 0) + 1, stream: 'out', data: crlf };
   logs[id] = [...(logs[id] ?? []), chunk];
-  emit('ck:term', { id, seq: chunk.seq, stream: 'out', data: text });
+  emit('ck:term', { id, seq: chunk.seq, stream: 'out', data: crlf });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

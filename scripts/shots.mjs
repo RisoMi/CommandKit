@@ -70,6 +70,11 @@ if (!termText.includes('fishery-agent')) {
   throw new Error(`切换标签后终端内容未更新：${termText.slice(0, 120)}`);
 }
 
+// CRLF（Windows 输出）必须正常渲染成行，不能被当成空的进度条刷新吞掉
+if (!termText.includes('应用启动完成')) {
+  throw new Error(`CRLF 输出没有渲染出来：${JSON.stringify(termText.slice(0, 200))}`);
+}
+
 // 复制输出：剪贴板里必须拿到该会话的内容（且不含 ANSI 转义）
 await page.getByRole('button', { name: '复制输出' }).click();
 await page.waitForTimeout(300);

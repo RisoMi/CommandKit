@@ -113,6 +113,30 @@ async fn captures_stdout_and_exit_code() {
     assert!(text.contains("会话结束"), "应记录退出摘要：{text}");
 }
 
+/// java -version 这类命令：只写 stderr、且瞬间退出（没有 sleep 兜底）
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn captures_stderr_only_fast_command() {
+    let sink = sink();
+    let state = make_state("stderr-only");
+    let cmd = if cfg!(windows) {
+        "cmd.exe /D /C \"echo fast-err-only 1>&2\""
+    } else {
+        "echo fast-err-only 1>&2"
+    };
+    let s = spec("t-stderr", cmd, None);
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+    assert!(wait_status(&state, "t-stderr", Status::Stopped, 12000).await);
+
+    let text: String = supervisor::log_snapshot(&state, "t-stderr")
+        .into_iter()
+        .map(|c| c.data)
+        .collect();
+    assert!(
+        text.contains("fast-err-only"),
+        "只写 stderr 的快速命令也必须被捕获：{text:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn non_zero_exit_marks_failed() {
     let sink = sink();
