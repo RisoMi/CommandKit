@@ -1,34 +1,71 @@
-//! 数据模型：项目 / 分类 / 模板 / 设置 / 运行时状态。
+//! 数据模型：项目（组件分组）/ 组件（启动单元）/ 模板 / 设置 / 运行时状态。
 //!
 //! 所有结构体统一 `camelCase` 序列化，前端 TypeScript 类型与之一一对应。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-fn default_category() -> String {
+fn default_project_id() -> String {
     "all".to_string()
+}
+
+/// 命令步骤之间的连接方式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Join {
+    /// 且：上一条成功后继续；上一条失败即按失败策略处理
+    And,
+    /// 或：上一条失败时才跑这一条（备选），上一条成功则跳过
+    Or,
+}
+
+impl Default for Join {
+    fn default() -> Self {
+        Join::And
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Project {
+pub struct CommandStep {
+    #[serde(default)]
+    pub cmd: String,
+    #[serde(default)]
+    pub join: Join,
+}
+
+impl CommandStep {
+    pub fn new(cmd: &str, join: Join) -> Self {
+        Self {
+            cmd: cmd.to_string(),
+            join,
+        }
+    }
+}
+
+/// 组件：真正被启动的单元（旧版本里叫「项目」）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Component {
     pub id: String,
     pub name: String,
-    #[serde(default = "default_category")]
-    pub category: String,
+    /// 所属项目 id（旧版本字段名 category）
+    #[serde(default = "default_project_id")]
+    pub project_id: String,
     /// 卡片右侧标签，例如 "npm dev" / "Python 3.11"
     #[serde(default)]
     pub stack: String,
     #[serde(default)]
     pub workdir: String,
+    /// 启动命令链：按顺序执行，步骤之间用「且 / 或」连接
     #[serde(default)]
-    pub command: String,
-    /// 仅注入到本项目的子进程，不写系统环境变量
+    pub commands: Vec<CommandStep>,
+    /// 仅注入到本组件的子进程，不写系统环境变量
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// 依赖的其它项目 id（拓扑排序用）
+    /// 依赖的其它组件 id（拓扑排序用）
     #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
@@ -111,9 +148,10 @@ impl Default for Policy {
     }
 }
 
+/// 项目：组件的分组容器（旧版本里叫「分类」）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Category {
+pub struct Project {
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -247,7 +285,7 @@ pub struct SessionView {
     pub command: String,
     pub workdir: String,
     pub ports: Vec<u16>,
-    pub category: String,
+    pub project_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

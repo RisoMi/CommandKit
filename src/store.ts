@@ -5,10 +5,10 @@ import { normalizeCr, parseAnsi, stripAnsi, type Seg } from './ansi';
 import type {
   AppInfo,
   BulkView,
-  Category,
+  Project,
   LogChunk,
   MetricRow,
-  Project,
+  Component,
   SessionView,
   Settings,
   Snapshot,
@@ -41,15 +41,16 @@ export const state = reactive({
   ready: false,
   info: null as AppInfo | null,
   projects: [] as Project[],
-  categories: [] as Category[],
+  components: [] as Component[],
   templates: [] as Template[],
   settings: null as Settings | null,
   sessions: {} as Record<string, SessionView>,
   metrics: {} as Record<string, MetricRow>,
   bulk: null as BulkView | null,
   view: 'workbench' as ViewKey,
-  activeCategory: 'all',
+  activeProjectId: 'all',
   activeSession: null as string | null,
+  activeGroup: null as string | null,
   activeTemplateId: null as string | null,
   selected: [] as string[],
   monitorFilter: 'all' as 'all' | 'running' | 'error' | 'stopped',
@@ -62,7 +63,7 @@ export const state = reactive({
 export const editor = reactive({
   open: false,
   isNew: false,
-  project: null as Project | null,
+  project: null as Component | null,
 });
 
 export const confirmState = reactive({
@@ -208,7 +209,7 @@ export async function clearTerm(id: string) {
 function applySnapshot(snap: Snapshot) {
   state.info = snap.info;
   state.projects = snap.projects;
-  state.categories = snap.categories;
+  state.components = snap.components;
   state.templates = snap.templates;
   state.settings = snap.settings;
   state.metrics = snap.metrics;
@@ -263,14 +264,14 @@ export async function bootstrapApp() {
 
 // ---------------------------------------------------------------- 选择器
 
-export const visibleProjects = computed(() => {
-  if (state.activeCategory === 'all') return state.projects;
-  return state.projects.filter((p) => p.category === state.activeCategory);
+export const visibleComponents = computed(() => {
+  if (state.activeProjectId === 'all') return state.components;
+  return state.components.filter((c) => (c.projectId || 'all') === state.activeProjectId);
 });
 
 export const batchIds = computed(() => {
   if (state.selected.length) return [...state.selected];
-  return visibleProjects.value.map((p) => p.id);
+  return visibleComponents.value.map((p) => p.id);
 });
 
 export function sessionOf(id: string): SessionView | null {
@@ -285,40 +286,98 @@ export function metricOf(id: string): MetricRow {
   return state.metrics[id] ?? { id, pid: null, cpu: 0, mem: 0, children: 0 };
 }
 
-export function categoryName(id: string): string {
+export function projectName(id: string): string {
   if (id === 'template') return '模板运行';
-  return state.categories.find((c) => c.id === id)?.name ?? '全部项目';
+  if (id === 'all') return '未归属项目';
+  return state.projects.find((p) => p.id === id)?.name ?? id;
 }
 
-export function categoryGroups() {
-  const groups: { id: string; name: string; projects: Project[] }[] = [];
-  const order = ['all', ...state.categories.map((c) => c.id)];
-  const list = visibleProjects.value;
-  for (const p of list) {
-    const key = p.category || 'all';
+/** 某个项目下的组件 */
+export interface TerminalGroup {
+  id: string;
+  name: string;
+  components: string[];
+}
+
+/** 终端页左侧「会话」列表：按项目聚合当前批量 / 已有会话 */
+export function terminalGroups(): TerminalGroup[] {
+  const out: TerminalGroup[] = [];
+  const add = (componentId: string) => {
+    const c = componentById(componentId);
+    const session = state.sessions[componentId];
+    const pid = c?.projectId ?? session?.projectId ?? 'all';
+    let g = out.find((x) => x.id === pid);
+    if (!g) {
+      g = { id: pid, name: projectName(pid), components: [] };
+      out.push(g);
+    }
+    if (!g.components.includes(componentId)) g.components.push(componentId);
+  };
+  const b = state.bulk;
+  if (b && !b.finished) b.order.forEach(add);
+  for (const s of Object.values(state.sessions)) {
+    if (s.kind === 'template') continue;
+    add(s.id);
+  }
+  return out;
+}
+
+/** 某个分组里最「活跃」的状态，用于会话列表的状态点 */
+export function groupStatus(group: TerminalGroup): Status {
+  const rank: Status[] = ['running', 'starting', 'restarting', 'failed', 'stopping', 'stopped', 'exited'];
+  for (const st of rank) {
+    if (group.components.some((id) => (state.sessions[id]?.status ?? 'stopped') === st)) return st;
+  }
+  return 'stopped';
+}
+
+export function componentsOfProject(projectId: string): Component[] {
+  return state.components.filter((c) => (c.projectId || 'all') === projectId);
+}
+
+/** 有组件的项目 id（用于终端页的会话列表） */
+export function projectIdsInPlay(): string[] {
+  const ids = new Set<string>();
+  for (const c of state.components) ids.add(c.projectId || 'all');
+  return [...ids];
+}
+
+/** 按项目分组（未分类归到「未归属项目」） */
+export function componentGroups() {
+  const groups: { id: string; name: string; components: Component[] }[] = [];
+  const order = ['all', ...state.projects.map((p) => p.id)];
+  const list = visibleComponents.value;
+
+  if (state.activeProjectId !== 'all') {
+    return [
+      {
+        id: state.activeProjectId,
+        name: projectName(state.activeProjectId),
+        components: list,
+      },
+    ].filter((g) => g.components.length);
+  }
+
+  for (const c of list) {
+    const key = c.projectId || 'all';
     let g = groups.find((x) => x.id === key);
     if (!g) {
-      g = { id: key, name: key === 'all' ? '未分类' : categoryName(key), projects: [] };
+      g = { id: key, name: key === 'all' ? '未归属项目' : projectName(key), components: [] };
       groups.push(g);
     }
-    g.projects.push(p);
-  }
-  if (state.activeCategory !== 'all') {
-    return [{ id: state.activeCategory, name: categoryName(state.activeCategory), projects: list }].filter(
-      (g) => g.projects.length
-    );
+    g.components.push(c);
   }
   groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   return groups;
 }
 
-export function projectById(id: string): Project | undefined {
-  return state.projects.find((p) => p.id === id);
+export function componentById(id: string): Component | undefined {
+  return state.components.find((p) => p.id === id);
 }
 
 export function sessionIds(): string[] {
   const ids = new Set<string>();
-  for (const p of state.projects) ids.add(p.id);
+  for (const p of state.components) ids.add(p.id);
   for (const s of Object.values(state.sessions)) ids.add(s.id);
   return [...ids];
 }
@@ -340,29 +399,29 @@ export async function act<T>(fn: () => Promise<T>, label?: string): Promise<T | 
   }
 }
 
-export async function runProject(id: string) {
+export async function runComponent(id: string) {
   state.busy[id] = true;
-  const r = await act(() => api.runProject(id), `启动 ${projectById(id)?.name ?? id}`);
+  const r = await act(() => api.runComponent(id), `启动 ${componentById(id)?.name ?? id}`);
   delete state.busy[id];
   return r;
 }
 
-export async function stopProject(id: string) {
+export async function stopComponent(id: string) {
   state.busy[id] = true;
-  await act(() => api.stopProject(id), `停止 ${projectById(id)?.name ?? id}`);
+  await act(() => api.stopComponent(id), `停止 ${componentById(id)?.name ?? id}`);
   delete state.busy[id];
 }
 
-export async function restartProject(id: string) {
+export async function restartComponent(id: string) {
   state.busy[id] = true;
-  await act(() => api.restartProject(id), '重启');
+  await act(() => api.restartComponent(id), '重启');
   window.setTimeout(() => delete state.busy[id], 1200);
 }
 
 export async function toggleRun(id: string) {
   const st = statusOf(id);
-  if (st === 'running' || st === 'starting' || st === 'restarting') return stopProject(id);
-  return runProject(id);
+  if (st === 'running' || st === 'starting' || st === 'restarting') return stopComponent(id);
+  return runComponent(id);
 }
 
 export async function runBatch(kind: 'run' | 'stop' | 'restart') {
@@ -376,7 +435,7 @@ export async function runBatch(kind: 'run' | 'stop' | 'restart') {
     const ok = await askConfirm({
       title: `一键${verb}`,
       message: `将对 ${ids.length} 个项目执行${verb}，停止 / 重启按依赖逆序终止整棵进程树。`,
-      detail: ids.map((id) => projectById(id)?.name ?? id).join(' · '),
+      detail: ids.map((id) => componentById(id)?.name ?? id).join(' · '),
       okText: `确认${verb}`,
       danger: true,
     });
@@ -393,6 +452,7 @@ export async function runBatch(kind: 'run' | 'stop' | 'restart') {
 
 export function openBulk(sessionId: string) {
   state.activeSession = sessionId;
+  state.activeGroup = componentById(sessionId)?.projectId ?? state.sessions[sessionId]?.projectId ?? 'all';
   state.view = 'bulk';
   hydrateTerm(sessionId);
 }
@@ -407,15 +467,15 @@ export function clearSelection() {
   state.selected = [];
 }
 
-export function newProject(): Project {
-  const cat = state.activeCategory === 'all' ? state.categories[1]?.id ?? 'all' : state.activeCategory;
+export function newComponent(): Component {
+  const pid = state.activeProjectId === 'all' ? state.projects[1]?.id ?? 'all' : state.activeProjectId;
   return {
     id: '',
     name: '',
-    category: cat,
+    projectId: pid,
     stack: '',
     workdir: '',
-    command: '',
+    commands: [],
     env: {},
     ports: [],
     dependsOn: [],
@@ -427,8 +487,8 @@ export function newProject(): Project {
   };
 }
 
-export function openEditor(project?: Project) {
-  editor.project = project ? JSON.parse(JSON.stringify(project)) : newProject();
+export function openEditor(project?: Component) {
+  editor.project = project ? JSON.parse(JSON.stringify(project)) : newComponent();
   editor.isNew = !project;
   editor.open = true;
 }
@@ -438,11 +498,11 @@ export function closeEditor() {
   editor.project = null;
 }
 
-export async function saveProjectFromEditor() {
+export async function saveComponentFromEditor() {
   if (!editor.project) return;
-  const p = editor.project as Project;
+  const p = editor.project as Component;
   try {
-    const snap = await api.saveProject(p);
+    const snap = await api.saveComponent(p);
     applySnapshot(snap);
     closeEditor();
     toast('ok', `已保存 ${p.name}`);
@@ -451,8 +511,8 @@ export async function saveProjectFromEditor() {
   }
 }
 
-export async function deleteProjectById(id: string) {
-  const p = projectById(id);
+export async function deleteComponentById(id: string) {
+  const p = componentById(id);
   const ok = await askConfirm({
     title: '删除项目',
     message: `确认删除「${p?.name ?? id}」？该操作不可撤销（配置有自动备份）。`,
@@ -460,7 +520,7 @@ export async function deleteProjectById(id: string) {
     danger: true,
   });
   if (!ok) return;
-  const r = await act(() => api.deleteProject(id), '删除项目');
+  const r = await act(() => api.deleteComponent(id), '删除项目');
   if (r) {
     applySnapshot(r);
     toast('ok', '已删除');

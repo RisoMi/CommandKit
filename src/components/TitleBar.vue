@@ -10,7 +10,7 @@ const isMac = computed(() => state.info?.platform === 'macos');
 
 const TITLES: Record<string, string> = {
   workbench: '项目工作台',
-  bulk: '批量运行',
+  bulk: '终端',
   templates: '模板库',
   monitor: '进程监管',
   settings: '设置',

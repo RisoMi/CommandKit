@@ -3,64 +3,72 @@ import { computed, reactive, ref } from 'vue';
 import { api } from '../api';
 import {
   apply,
+  groupStatus,
   hydrateTerm,
+  projectName,
   state,
+  terminalGroups,
   toast,
 } from '../store';
-import type { Category, ViewKey } from '../types';
+import type { Project, ViewKey } from '../types';
 
 const NAV: { key: ViewKey; label: string }[] = [
   { key: 'workbench', label: '项目工作台' },
-  { key: 'bulk', label: '批量运行' },
+  { key: 'bulk', label: '终端' },
   { key: 'templates', label: '模板库' },
   { key: 'monitor', label: '进程监管' },
   { key: 'settings', label: '设置' },
 ];
 
-const catCount = computed(() => {
+/** 每个项目下的组件数 */
+const componentCount = computed(() => {
   const map: Record<string, number> = {};
-  for (const p of state.projects) map[p.category] = (map[p.category] ?? 0) + 1;
+  for (const c of state.components) map[c.projectId || 'all'] = (map[c.projectId || 'all'] ?? 0) + 1;
   return map;
 });
 
-const sessions = computed(() =>
-  Object.values(state.sessions)
-    .slice()
-    .sort((a, b) => {
-      const rank = (s: string) => (s === 'running' ? 0 : s === 'starting' ? 1 : s === 'failed' ? 2 : 3);
-      const d = rank(a.status) - rank(b.status);
-      return d !== 0 ? d : a.name.localeCompare(b.name);
-    })
-);
+/** 终端页的「会话」：按项目聚合 */
+const groups = computed(() => terminalGroups());
 
-const errorCount = computed(() => Object.values(state.sessions).filter((s) => s.status === 'failed').length);
+const errorCount = computed(
+  () => Object.values(state.sessions).filter((s) => s.status === 'failed').length
+);
 
 function go(view: ViewKey) {
   state.view = view;
 }
 
-function pickCategory(id: string) {
-  state.activeCategory = id;
+function pickProject(id: string) {
+  state.activeProjectId = id;
   state.view = 'workbench';
 }
 
-// ---------------------------------------------------------------- 分类管理
-const catMgr = reactive({ open: false, name: '' });
+function pickGroup(id: string) {
+  state.activeGroup = id;
+  const g = groups.value.find((x) => x.id === id);
+  if (g?.components.length) {
+    state.activeSession = g.components[0];
+    hydrateTerm(g.components[0]);
+  }
+}
+
+// ---------------------------------------------------------------- 项目管理
+const projectMgr = reactive({ open: false, name: '' });
 const busy = ref(false);
 
-async function addCategory() {
-  const name = catMgr.name.trim();
+async function addProject() {
+  const name = projectMgr.name.trim();
   if (!name) return;
   busy.value = true;
   try {
-    const snap = await api.saveCategory({
+    const snap = await api.saveProject({
       id: '',
       name,
-      order: state.categories.length + 1,
+      order: state.projects.length + 1,
       color: null,
     });
     apply(snap);
-    catMgr.name = '';
+    projectMgr.name = '';
   } catch (e) {
     toast('error', String(e));
   } finally {
@@ -68,20 +76,20 @@ async function addCategory() {
   }
 }
 
-async function renameCategory(c: Category) {
+async function renameProject(p: Project) {
   try {
-    apply(await api.saveCategory(c));
-    toast('ok', '分类已更新');
+    apply(await api.saveProject(p));
+    toast('ok', '项目已更新');
   } catch (e) {
     toast('error', String(e));
   }
 }
 
-async function removeCategory(c: Category) {
+async function removeProject(p: Project) {
   try {
-    apply(await api.deleteCategory(c.id));
-    if (state.activeCategory === c.id) state.activeCategory = 'all';
-    toast('ok', `已删除分类「${c.name}」，其中项目已归入未分类`);
+    apply(await api.deleteProject(p.id));
+    if (state.activeProjectId === p.id) state.activeProjectId = 'all';
+    toast('ok', `已删除项目「${p.name}」，其中组件已归入未归属`);
   } catch (e) {
     toast('error', String(e));
   }
@@ -111,46 +119,47 @@ function pickTemplate(id: string) {
       <span v-if="nav.key === 'monitor' && errorCount" class="kbadge">{{ errorCount }}</span>
     </div>
 
-    <!-- 项目工作台：分类 -->
+    <!-- 项目工作台：项目列表 -->
     <template v-if="state.view === 'workbench'">
       <div class="sidehead">
-        <span>分类</span><span @click="catMgr.open = true">管理</span>
+        <span>项目</span><span class="mgmt" @click="projectMgr.open = true">管理</span>
       </div>
-      <div class="cat" :class="{ active: state.activeCategory === 'all' }" @click="pickCategory('all')">
+      <div class="cat" :class="{ active: state.activeProjectId === 'all' }" @click="pickProject('all')">
         <span class="cdot" style="background: #9eff00"></span>
         <span class="cname">全部项目</span>
-        <em>{{ state.projects.length }}</em>
+        <em>{{ state.components.length }}</em>
       </div>
       <div
-        v-for="c in state.categories.filter((x) => x.id !== 'all')"
-        :key="c.id"
+        v-for="p in state.projects.filter((x) => x.id !== 'all')"
+        :key="p.id"
         class="cat"
-        :class="{ active: state.activeCategory === c.id }"
-        @click="pickCategory(c.id)"
+        :class="{ active: state.activeProjectId === p.id }"
+        @click="pickProject(p.id)"
       >
-        <span class="cdot" :style="{ background: c.color ?? '#62686d' }"></span>
-        <span class="cname">{{ c.name }}</span>
-        <em>{{ catCount[c.id] ?? 0 }}</em>
+        <span class="cdot" :style="{ background: p.color ?? '#62686d' }"></span>
+        <span class="cname">{{ p.name }}</span>
+        <em>{{ componentCount[p.id] ?? 0 }}</em>
       </div>
-      <div class="newbtn" @click="catMgr.open = true">+ 新建分类</div>
+      <div class="newbtn" @click="projectMgr.open = true">+ 新建项目</div>
     </template>
 
-    <!-- 批量运行：会话 -->
+    <!-- 终端：会话（按项目聚合） -->
     <template v-else-if="state.view === 'bulk'">
       <div class="sidehead">
-        <span>会话</span><span>{{ sessions.length }}</span>
+        <span>会话</span><span>{{ groups.length }}</span>
       </div>
       <div
-        v-for="s in sessions"
-        :key="s.id"
+        v-for="g in groups"
+        :key="g.id"
         class="side-session"
-        :class="{ active: state.activeSession === s.id }"
-        @click="(state.activeSession = s.id), hydrateTerm(s.id)"
+        :class="{ active: state.activeGroup === g.id }"
+        @click="pickGroup(g.id)"
       >
-        <i class="dot" :class="s.status"></i>
-        <span class="nm">{{ s.name }}</span>
+        <i class="dot" :class="groupStatus(g)"></i>
+        <span class="nm">{{ g.name }}</span>
+        <em class="cnt">{{ g.components.length }}</em>
       </div>
-      <div v-if="!sessions.length" class="sidefoot">还没有会话，从工作台启动项目。</div>
+      <div v-if="!groups.length" class="sidefoot">还没有会话，从工作台点「一键运行」或单个「运行」。</div>
     </template>
 
     <!-- 模板库 -->
@@ -173,7 +182,7 @@ function pickTemplate(id: string) {
     <template v-else-if="state.view === 'monitor'">
       <div class="sidehead"><span>视图</span><span>刷新 2s</span></div>
       <div class="cat" :class="{ active: state.monitorFilter === 'all' }" @click="state.monitorFilter = 'all'">
-        <span class="cname">全部进程</span><em>{{ sessions.length }}</em>
+        <span class="cname">全部组件</span><em>{{ Object.keys(state.sessions).length }}</em>
       </div>
       <div
         class="cat"
@@ -181,7 +190,7 @@ function pickTemplate(id: string) {
         @click="state.monitorFilter = 'running'"
       >
         <span class="cname">运行中</span>
-        <em>{{ sessions.filter((s) => s.status === 'running' || s.status === 'starting').length }}</em>
+        <em>{{ Object.values(state.sessions).filter((s) => s.status === 'running' || s.status === 'starting').length }}</em>
       </div>
       <div
         class="cat"
@@ -196,7 +205,7 @@ function pickTemplate(id: string) {
         @click="state.monitorFilter = 'stopped'"
       >
         <span class="cname">已停止</span>
-        <em>{{ sessions.filter((s) => s.status === 'stopped' || s.status === 'exited').length }}</em>
+        <em>{{ Object.values(state.sessions).filter((s) => s.status === 'stopped' || s.status === 'exited').length }}</em>
       </div>
       <div class="newbtn" @click="state.autoRefresh = !state.autoRefresh">
         自动刷新 · {{ state.autoRefresh ? '开' : '关' }}
@@ -215,26 +224,26 @@ function pickTemplate(id: string) {
       <div class="pathline" :title="state.info?.dataRoot">{{ state.info?.dataRoot }}</div>
     </div>
 
-    <!-- 分类管理弹层 -->
-    <div v-if="catMgr.open" class="mask" @click.self="catMgr.open = false">
+    <!-- 项目管理弹层 -->
+    <div v-if="projectMgr.open" class="mask" @click.self="projectMgr.open = false">
       <div class="modal sm">
         <div class="modal-h">
-          <h3>分类管理</h3>
-          <span class="x" @click="catMgr.open = false">✕</span>
+          <h3>项目管理</h3>
+          <span class="x" @click="projectMgr.open = false">✕</span>
         </div>
         <div class="modal-b">
-          <div v-for="c in state.categories" :key="c.id" class="catrow">
-            <input v-model="c.name" :disabled="c.id === 'all'" @change="renameCategory(c)" />
-            <span class="cnt">{{ catCount[c.id] ?? 0 }} 个项目</span>
-            <span v-if="c.id !== 'all'" class="pop stop" @click="removeCategory(c)">删除</span>
+          <div v-for="p in state.projects" :key="p.id" class="catrow">
+            <input v-model="p.name" :disabled="p.id === 'all'" @change="renameProject(p)" />
+            <span class="cnt">{{ componentCount[p.id] ?? 0 }} 个组件</span>
+            <span v-if="p.id !== 'all'" class="pop stop" @click="removeProject(p)">删除</span>
             <span v-else class="muted" style="font-size: 10.5px">内置</span>
           </div>
           <div class="row" style="margin-top: 4px">
-            <input v-model="catMgr.name" placeholder="新分类名称，回车创建" @keyup.enter="addCategory" />
-            <button class="btn sm" :disabled="busy || !catMgr.name.trim()" @click="addCategory">添加</button>
+            <input v-model="projectMgr.name" placeholder="新项目名称，回车创建" @keyup.enter="addProject" />
+            <button class="btn sm" :disabled="busy || !projectMgr.name.trim()" @click="addProject">添加</button>
           </div>
           <div class="hint muted" style="font-size: 10.5px">
-            删除分类不会删除项目，其中的项目会回到「未分类」。分类与项目同存 projects.json。
+            删除项目不会删除组件，其中的组件会回到「未归属」。项目与组件同存 projects.json。
           </div>
         </div>
       </div>
@@ -261,11 +270,6 @@ function pickTemplate(id: string) {
   flex: 1;
   min-width: 0;
 }
-.pathline {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .catrow .cnt {
   color: var(--t4);
   font-size: 10.5px;
@@ -276,5 +280,22 @@ function pickTemplate(id: string) {
 }
 .catrow .pop {
   flex: none;
+}
+.mgmt {
+  cursor: pointer;
+}
+.mgmt:hover {
+  color: var(--t2);
+}
+.cnt {
+  color: var(--t4);
+  font-size: 10px;
+  font-family: var(--mono);
+  flex: none;
+}
+.pathline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

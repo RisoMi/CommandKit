@@ -132,16 +132,18 @@ async function runTemplate(id: string) {
   }
 }
 
-async function asProject() {
+async function asComponent() {
   if (!tpl.value) return;
   const t = tpl.value;
-  const project = {
+  const component = {
     id: '',
     name: t.name,
-    category: 'all',
+    projectId: state.projects[1]?.id ?? 'all',
     stack: t.platform,
     workdir: t.workdir,
-    command: t.commands.map((c: TemplateCommand) => c.cmd).join(' && '),
+    commands: t.commands
+      .filter((c: TemplateCommand) => c.cmd.trim())
+      .map((c: TemplateCommand, i: number) => ({ cmd: c.cmd, join: i === 0 ? ('and' as const) : ('and' as const) })),
     env: { ...t.env },
     ports: [],
     dependsOn: [],
@@ -152,9 +154,9 @@ async function asProject() {
     note: t.desc,
   };
   try {
-    const snap = await api.saveProject(project);
+    const snap = await api.saveComponent(component);
     apply(snap);
-    toast('ok', '已存为项目，可在工作台运行 / 编辑');
+    toast('ok', '已存为组件，可在工作台运行 / 编辑');
   } catch (e) {
     toast('error', String(e));
   }
@@ -289,7 +291,7 @@ const shellLabel = computed(() => {
     </div>
 
     <div v-if="tpl && !editing" class="flex">
-      <button class="btn sm" @click="asProject">另存为项目</button>
+      <button class="btn sm" @click="asComponent">另存为组件</button>
       <button class="btn sm" @click="runTemplate(tpl.id)">在终端运行</button>
       <span class="muted" style="font-size: 10.5px">
         运行模板会创建独立会话（会话 id 形如 tpl:{{ tpl.id }}），不进批量队列。

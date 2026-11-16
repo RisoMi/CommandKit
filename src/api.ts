@@ -1,6 +1,6 @@
 import { invoke } from './bridge';
 import type {
-  Category,
+  Component,
   LogChunk,
   ProcessDetail,
   Project,
@@ -12,20 +12,22 @@ import type {
 export const api = {
   bootstrap: () => invoke<Snapshot>('bootstrap'),
 
+  // 项目（组件分组）
   saveProject: (project: Project) => invoke<Snapshot>('save_project', { project }),
   deleteProject: (id: string) => invoke<Snapshot>('delete_project', { id }),
 
-  saveCategory: (category: Category) => invoke<Snapshot>('save_category', { category }),
-  deleteCategory: (id: string) => invoke<Snapshot>('delete_category', { id }),
+  // 组件（可启动单元）
+  saveComponent: (component: Component) => invoke<Snapshot>('save_component', { component }),
+  deleteComponent: (id: string) => invoke<Snapshot>('delete_component', { id }),
 
   saveTemplate: (template: Template) => invoke<Snapshot>('save_template', { template }),
   deleteTemplate: (id: string) => invoke<Snapshot>('delete_template', { id }),
 
   saveSettings: (settings: Settings) => invoke<Snapshot>('save_settings', { settings }),
 
-  runProject: (id: string) => invoke<void>('run_project', { id }),
-  stopProject: (id: string) => invoke<void>('stop_project', { id }),
-  restartProject: (id: string) => invoke<void>('restart_project', { id }),
+  runComponent: (id: string) => invoke<void>('run_component', { id }),
+  stopComponent: (id: string) => invoke<void>('stop_component', { id }),
+  restartComponent: (id: string) => invoke<void>('restart_component', { id }),
 
   runMany: (ids: string[]) => invoke<void>('run_many', { ids }),
   stopMany: (ids: string[]) => invoke<void>('stop_many_cmd', { ids }),

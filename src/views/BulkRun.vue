@@ -6,19 +6,34 @@ import { copyText } from '../clipboard';
 import { fmtMem, statusText } from '../format';
 import {
   clearTerm,
+  componentById,
   hydrateTerm,
-  projectById,
-  restartProject,
-  runProject,
+  restartComponent,
+  runComponent,
   state,
-  stopProject,
+  stopComponent,
   termText,
+  terminalGroups,
   toast,
 } from '../store';
 import type { SessionView } from '../types';
 
-const sessions = computed(() =>
-  Object.values(state.sessions).filter((s) => s.kind === 'project' || s.kind === 'template')
+const groups = computed(() => terminalGroups());
+
+/** 当前会话（项目）+ 该项目的组件页签 */
+const activeGroup = computed(() => {
+  const id = state.activeGroup;
+  if (id && groups.value.some((g) => g.id === id)) return id;
+  if (state.activeSession) {
+    const pid =
+      componentById(state.activeSession)?.projectId ?? state.sessions[state.activeSession]?.projectId;
+    if (pid) return pid;
+  }
+  return groups.value[0]?.id ?? null;
+});
+
+const groupComponents = computed(
+  () => groups.value.find((g) => g.id === activeGroup.value)?.components ?? []
 );
 
 interface TabItem {
@@ -26,57 +41,34 @@ interface TabItem {
   name: string;
   status: string;
   started: boolean;
-  batch: boolean;
 }
 
-/**
- * 页签 = 本次批量队列（含尚未启动的项目，占位可见）+ 其它已有会话。
- * 之前只按「已存在会话」渲染，一键运行时后面的项目还没启动就没有页签，无法切换。
- */
-const tabs = computed<TabItem[]>(() => {
-  const seen = new Set<string>();
-  const out: TabItem[] = [];
-
-  const push = (id: string, batch: boolean) => {
-    if (!id || seen.has(id)) return;
-    seen.add(id);
+const tabs = computed<TabItem[]>(() =>
+  groupComponents.value.map((id) => {
     const s = state.sessions[id];
-    const p = projectById(id);
-    if (!s && !p) return;
-    out.push({
+    const c = componentById(id);
+    return {
       id,
-      name: s?.name ?? p?.name ?? id,
+      name: s?.name ?? c?.name ?? id,
       status: s?.status ?? 'stopped',
       started: !!s,
-      batch,
-    });
-  };
-
-  // 1) 队列中的项目（进行中时也包含尚未启动的）
-  const b = state.bulk;
-  if (b && !b.finished) {
-    for (const id of b.order) push(id, true);
-  }
-  // 2) 已有会话（模板 / 单跑的项目 / 已完成的批量）
-  for (const s of sessions.value) push(s.id, false);
-
-  return out;
-});
+    };
+  })
+);
 
 const active = computed(() => {
   const id = state.activeSession;
-  if (id && (state.sessions[id] || projectById(id))) return id;
-  const running = tabs.value.find((t) => t.status === 'running');
-  return running?.id ?? tabs.value[0]?.id ?? null;
+  if (id && groupComponents.value.includes(id)) return id;
+  return groupComponents.value[0] ?? null;
 });
-
-const activeProject = computed(() => (active.value ? projectById(active.value) : undefined));
-const cmdText = computed(() => activeSession.value?.command ?? activeProject.value?.command ?? '');
-const cwdText = computed(() => activeSession.value?.workdir ?? activeProject.value?.workdir ?? '');
 
 const activeSession = computed<SessionView | null>(() =>
   active.value ? state.sessions[active.value] ?? null : null
 );
+const activeComponent = computed(() => (active.value ? componentById(active.value) : undefined));
+
+const cmdText = computed(() => activeSession.value?.command ?? activeComponent.value?.commands?.map((s) => s.cmd).join(' 且 ') ?? '');
+const cwdText = computed(() => activeSession.value?.workdir ?? activeComponent.value?.workdir ?? '');
 
 onMounted(() => {
   if (active.value) hydrateTerm(active.value);
@@ -87,17 +79,16 @@ function pick(id: string) {
   hydrateTerm(id);
 }
 
-/** 空白终端的提示：区分「还没启动」和「启动了但没输出」 */
 const emptyHint = computed(() => {
   const id = active.value;
   if (!id) return '还没有会话。回到「项目工作台」点「一键运行」或单个「运行」。';
   const tab = tabs.value.find((t) => t.id === id);
   if (!tab) return undefined;
   if (!tab.started) {
-    return '该项目还没启动 —— 等批量队列执行到它，或点下方「启动会话」。';
+    return '该组件还没启动 —— 等批量队列执行到它，或点下方「启动组件」。';
   }
   if (tab.status === 'stopped' || tab.status === 'exited' || tab.status === 'failed') {
-    return `该会话${statusText(tab.status)}，点下方「启动会话」可重新运行（当前没有输出）。`;
+    return `该会话${statusText(tab.status)}，点下方「启动组件」可重新运行（当前没有输出）。`;
   }
   return undefined;
 });
@@ -110,25 +101,13 @@ const bulkPct = computed(() => {
   return Math.round((done / b.total) * 100);
 });
 
-interface QueueRow {
-  id: string;
-  name: string;
-  status: string;
-  label: string;
-  tone: 'done' | 'running' | 'failed' | 'waiting';
-}
-
-const queue = computed<QueueRow[]>(() => {
+const queue = computed(() => {
   const b = bulk.value;
-  const ids = b?.order?.length
-    ? b.order
-    : state.projects.filter((p) => state.sessions[p.id]).map((p) => p.id);
-  const rows: QueueRow[] = [];
-  for (const id of ids) {
-    const name = projectById(id)?.name ?? state.sessions[id]?.name ?? id;
+  return groupComponents.value.map((id) => {
+    const name = componentById(id)?.name ?? state.sessions[id]?.name ?? id;
     const bs = b?.status?.[id];
     let label = '';
-    let tone: QueueRow['tone'] = 'waiting';
+    let tone: 'done' | 'running' | 'failed' | 'waiting' = 'waiting';
     if (bs === 'done') {
       label = '就绪';
       tone = 'done';
@@ -140,18 +119,15 @@ const queue = computed<QueueRow[]>(() => {
       tone = 'failed';
     } else if (bs === 'skipped') {
       label = '已跳过';
-      tone = 'waiting';
     } else if (bs === 'waiting') {
       label = '等待';
-      tone = 'waiting';
     } else {
       const st = state.sessions[id]?.status ?? 'stopped';
       label = statusText(st);
       tone = st === 'running' ? 'done' : st === 'failed' ? 'failed' : st === 'starting' ? 'running' : 'waiting';
     }
-    rows.push({ id, name, status: bs ?? state.sessions[id]?.status ?? 'stopped', label, tone });
-  }
-  return rows;
+    return { id, name, status: state.sessions[id]?.status ?? 'stopped', label, tone };
+  });
 });
 
 /** 有选中就复制选中，否则复制整段输出（已去掉 ANSI 转义） */
@@ -195,17 +171,13 @@ async function openExternal() {
   <div class="fill-col">
     <header class="head">
       <div>
-        <h2>批量运行 · 多终端</h2>
-        <p>按 dependsOn 拓扑排序启动，前序健康检查通过再启动后继；每个标签是独立会话。</p>
+        <h2>终端</h2>
+        <p>按 dependsOn 拓扑排序启动；左侧「会话」是项目，顶部标签是该项目下的组件。</p>
       </div>
       <div class="actions">
         <button class="btn" @click="api.openDataDir()">数据目录</button>
-        <button class="btn" :disabled="!sessions.length" @click="exportLog">导出日志</button>
-        <button
-          v-if="bulk && !bulk.finished"
-          class="btn danger"
-          @click="api.cancelBulk()"
-        >
+        <button class="btn" :disabled="!active" @click="exportLog">导出日志</button>
+        <button v-if="bulk && !bulk.finished" class="btn danger" @click="api.cancelBulk()">
           中断全部
         </button>
       </div>
@@ -217,11 +189,13 @@ async function openExternal() {
         {{ bulk.finished ? '已完成' : '中' }} · {{ bulkPct }}%
       </strong>
       <span v-if="bulk.message">{{ bulk.message }}</span>
-      <span v-else>按依赖顺序：{{ bulk.order.map((id) => projectById(id)?.name ?? id).join(' → ') }}</span>
+      <span v-else>
+        共 {{ bulk.total }} 个组件，按依赖顺序执行
+      </span>
       <div class="progress"><i :style="{ width: `${bulkPct}%` }"></i></div>
     </div>
 
-    <template v-if="sessions.length || active">
+    <template v-if="groups.length || active">
       <div class="tabs">
         <div
           v-for="t in tabs"
@@ -235,7 +209,7 @@ async function openExternal() {
           <span class="tabname">{{ t.name }}</span>
         </div>
         <span v-if="!tabs.length" class="muted" style="font-size: 11px; padding: 7px 2px">
-          本次没有项目
+          该项目下没有组件
         </span>
       </div>
 
@@ -245,7 +219,7 @@ async function openExternal() {
             <span class="mono cmdtext" :title="cmdText">
               <span class="muted">$</span> {{ cmdText }}
             </span>
-            <span class="mono muted">{{ cwdText }}</span>
+            <span class="mono muted cmdcwd">{{ cwdText }}</span>
             <span class="pill" :class="activeSession?.status">{{ statusText(activeSession?.status ?? 'stopped') }}</span>
             <span class="muted" style="font-size: 10px">可选中复制</span>
             <span v-if="state.metrics[active ?? '']" class="mono muted">
@@ -257,8 +231,8 @@ async function openExternal() {
           <Terminal :id="active ?? ''" :empty-hint="emptyHint" />
 
           <div class="flex wrap" style="margin-top: 8px">
-            <button class="btn sm" :disabled="!active" @click="active && restartProject(active)">重启当前</button>
-            <button class="btn sm danger" :disabled="!active" @click="active && stopProject(active)">
+            <button class="btn sm" :disabled="!active" @click="active && restartComponent(active)">重启当前</button>
+            <button class="btn sm danger" :disabled="!active" @click="active && stopComponent(active)">
               停止当前
             </button>
             <button class="btn sm" :disabled="!active" @click="openExternal">打开外部终端</button>
@@ -267,9 +241,9 @@ async function openExternal() {
             <button
               class="btn sm"
               :disabled="!active || activeSession?.status === 'running'"
-              @click="active && runProject(active)"
+              @click="active && runComponent(active)"
             >
-              启动会话
+              启动组件
             </button>
           </div>
         </div>
@@ -285,10 +259,10 @@ async function openExternal() {
             <b>{{ row.label }}</b>
           </div>
           <div v-if="!queue.length" class="muted" style="font-size: 10.5px">
-            还没有项目会话。
+            该项目下还没有组件。
           </div>
           <div class="qhint">
-            队列顺序由项目的依赖关系决定，可在「编辑项目 → 依赖」里调整。
+            队列顺序由组件的依赖关系决定，可在「编辑组件 → 依赖」里调整。
           </div>
         </div>
       </div>
@@ -342,6 +316,12 @@ async function openExternal() {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+.cmdcwd {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .qname {
   overflow: hidden;

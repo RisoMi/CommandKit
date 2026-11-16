@@ -12,7 +12,8 @@ const stick = ref(true);
 const input = ref('');
 
 const t = computed(() => term[props.id]);
-const lineCount = computed(() => t.value?.lines.length ?? 0);
+/** 行数直接从 t 取：二级 computed 在「键后建」的场景下不会失效 */
+const lineCount = () => t.value?.lines.length ?? 0;
 // 尾部未换行的内容（进度条等）同样要处理 \r 与 ANSI，避免显示成乱码
 const pending = computed(() => stripAnsi(normalizeCr(t.value?.pending ?? '')));
 
@@ -27,11 +28,14 @@ function onScroll() {
   stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
 }
 
-watch(lineCount, async () => {
-  if (!stick.value) return;
-  await nextTick();
-  scrollBottom();
-});
+watch(
+  () => lineCount(),
+  async () => {
+    if (!stick.value) return;
+    await nextTick();
+    scrollBottom();
+  }
+);
 
 watch(
   () => props.id,
@@ -64,7 +68,7 @@ async function send() {
         <span v-if="!line.segs.length">&#8203;</span>
       </div>
       <div v-if="pending" class="ln pending">{{ pending }}</div>
-      <div v-if="!lineCount && !pending" class="term-empty">
+      <div v-if="!lineCount() && !pending" class="term-empty">
         {{ emptyHint ?? '还没有输出。启动项目后，子 shell 的 stdout / stderr 会实时出现在这里。' }}
       </div>
     </div>

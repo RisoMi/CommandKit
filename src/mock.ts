@@ -7,7 +7,8 @@
 
 import type {
   BulkView,
-  Category,
+  CommandStep,
+  Component,
   LogChunk,
   MetricRow,
   ProcessDetail,
@@ -37,7 +38,7 @@ function emit(event: string, payload: unknown) {
 const now = () => Date.now();
 const uid = (p: string) => `${p}${now().toString(36)}`;
 
-const categories: Category[] = [
+const projects: Project[] = [
   { id: 'all', name: '全部项目', order: 0, color: null },
   { id: 'frontend', name: '前端', order: 1, color: '#5B9DFF' },
   { id: 'backend', name: '后端', order: 2, color: '#9EFF00' },
@@ -54,12 +55,12 @@ const settings: Settings = {
   sidebarCollapsed: false,
 };
 
-function mkProject(p: Partial<Project> & { id: string; name: string }): Project {
+function mkComponent(p: Partial<Component> & { id: string; name: string }): Component {
   return {
-    category: 'all',
+    projectId: 'all',
     stack: '',
     workdir: '',
-    command: '',
+    commands: [],
     env: {},
     ports: [],
     dependsOn: [],
@@ -72,34 +73,34 @@ function mkProject(p: Partial<Project> & { id: string; name: string }): Project 
   };
 }
 
-const projects: Project[] = [
-  mkProject({
+const components: Component[] = [
+  mkComponent({
     id: 'fishery-web',
     name: 'fishery-web',
-    category: 'frontend',
+    projectId: 'frontend',
     stack: 'npm dev',
     workdir: '~/work/ocean-fishery-code/web',
-    command: 'npm run dev -- --port 5173',
+    commands: [{ cmd: 'npm run dev -- --port 5173', join: 'and' }],
     ports: [5173],
     dependsOn: ['fishery-agent'],
   }),
-  mkProject({
+  mkComponent({
     id: 'admin-vue',
     name: 'admin-vue',
-    category: 'frontend',
+    projectId: 'frontend',
     stack: 'vite',
     workdir: '~/work/admin-vue',
-    command: 'npm run dev -- --port 5174',
+    commands: [{ cmd: 'npm run dev -- --port 5174', join: 'and' }],
     ports: [5174],
     dependsOn: ['fishery-agent'],
   }),
-  mkProject({
+  mkComponent({
     id: 'fishery-agent',
     name: 'fishery-agent',
-    category: 'backend',
+    projectId: 'backend',
     stack: 'Python 3.11',
     workdir: '~/work/fishery-agent',
-    command: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000',
+    commands: [{ cmd: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000', join: 'and' }],
     env: {
       PYTHON_HOME: '~/pyenv/versions/3.11',
       OLLAMA_HOST: 'http://127.0.0.1:11434',
@@ -109,32 +110,32 @@ const projects: Project[] = [
     dependsOn: ['redis-local', 'fishery-backend-java'],
     health: { url: 'http://127.0.0.1:8000/health', port: null, timeoutMs: 60000, retry: 30, intervalMs: 1000 },
   }),
-  mkProject({
+  mkComponent({
     id: 'fishery-backend-java',
     name: 'fishery-backend-java',
-    category: 'backend',
+    projectId: 'backend',
     stack: 'Java 17',
     workdir: '~/work/fishery-backend-java',
-    command: './gradlew bootRun --args=--server.port=8080',
+    commands: [{ cmd: './gradlew bootRun --args=--server.port=8080', join: 'and' }],
     ports: [8080],
     dependsOn: ['redis-local'],
   }),
-  mkProject({
+  mkComponent({
     id: 'redis-local',
     name: 'redis-local',
-    category: 'middleware',
+    projectId: 'middleware',
     stack: 'Redis 7',
     workdir: '~/Tools/redis',
-    command: 'redis-server --port 6379 --save ""',
+    commands: [{ cmd: 'redis-server --port 6379 --save ""', join: 'and' }],
     ports: [6379],
   }),
-  mkProject({
+  mkComponent({
     id: 'postgres-local',
     name: 'postgres-local',
-    category: 'data',
+    projectId: 'data',
     stack: 'PostgreSQL',
     workdir: '~/Tools/pgsql',
-    command: 'pg_ctl -D ./data start',
+    commands: [{ cmd: 'pg_ctl -D ./data start', join: 'and' }],
     ports: [5432],
   }),
 ];
@@ -193,7 +194,7 @@ const sessions: Record<string, SessionView> = {
     command: 'npm run dev -- --port 5173',
     workdir: '~/work/ocean-fishery-code/web',
     ports: [5173],
-    category: 'frontend',
+    projectId: 'frontend',
   },
   'admin-vue': {
     id: 'admin-vue',
@@ -209,7 +210,7 @@ const sessions: Record<string, SessionView> = {
     command: 'npm run dev -- --port 5174',
     workdir: '~/work/admin-vue',
     ports: [5174],
-    category: 'frontend',
+    projectId: 'frontend',
   },
   'fishery-agent': {
     id: 'fishery-agent',
@@ -225,7 +226,7 @@ const sessions: Record<string, SessionView> = {
     command: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000',
     workdir: '~/work/fishery-agent',
     ports: [8000],
-    category: 'backend',
+    projectId: 'backend',
   },
   'fishery-backend-java': {
     id: 'fishery-backend-java',
@@ -241,7 +242,7 @@ const sessions: Record<string, SessionView> = {
     command: './gradlew bootRun --args=--server.port=8080',
     workdir: '~/work/fishery-backend-java',
     ports: [8080],
-    category: 'backend',
+    projectId: 'backend',
   },
   'redis-local': {
     id: 'redis-local',
@@ -257,7 +258,7 @@ const sessions: Record<string, SessionView> = {
     command: 'redis-server --port 6379 --save ""',
     workdir: '~/Tools/redis',
     ports: [6379],
-    category: 'middleware',
+    projectId: 'middleware',
   },
   'postgres-local': {
     id: 'postgres-local',
@@ -273,7 +274,7 @@ const sessions: Record<string, SessionView> = {
     command: 'pg_ctl -D ./data start',
     workdir: '~/Tools/pgsql',
     ports: [5432],
-    category: 'data',
+    projectId: 'data',
   },
 };
 
@@ -298,12 +299,8 @@ const logs: Record<string, LogChunk[]> = {
     { seq: 8, stream: 'out', data: '\x1b[32m[13:03:12] INFO  Upstream ready, health check passed\x1b[0m\n' },
     { seq: 9, stream: 'out', data: '\x1b[90m[13:04:02] INFO  127.0.0.1:51234 - "GET /health 200 OK"\x1b[0m\n' },
   ],
-  'fishery-web': [
-    { seq: 1, stream: 'out', data: '\x1b[90m# 独立会话 · cwd=~/work/ocean-fishery-code/web · env 由 Rust 注入\x1b[0m\n' },
-    { seq: 2, stream: 'out', data: '\x1b[32m$\x1b[0m npm run dev -- --port 5173\n' },
-    { seq: 3, stream: 'out', data: '\n\x1b[32m  VITE v6.4.6\x1b[0m  ready in \x1b[33m412\x1b[0m ms\n' },
-    { seq: 4, stream: 'out', data: '  \x1b[32m➜\x1b[0m  Local:   \x1b[36mhttp://localhost:5173/\x1b[0m\n' },
-  ],
+  'fishery-web': [],
+
 };
 
 let bulk: BulkView | null = null;
@@ -312,7 +309,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.1.6',
+      version: '1.1.7',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -326,7 +323,7 @@ function snapshot(): Snapshot {
       webview: 'WKWebView',
     },
     projects: JSON.parse(JSON.stringify(projects)),
-    categories: JSON.parse(JSON.stringify(categories)),
+    components: JSON.parse(JSON.stringify(components)),
     templates: JSON.parse(JSON.stringify(templates)),
     settings: { ...settings },
     sessions: Object.values(sessions).map((s) => ({ ...s })),
@@ -353,11 +350,11 @@ function pushLog(id: string, text: string) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function startOne(id: string) {
-  const p = projects.find((x) => x.id === id);
+  const p = components.find((x) => x.id === id);
   if (!p) throw new Error(`未知项目：${id}`);
   setSession(id, { status: 'starting', pid: null, error: null, startedAt: now() });
   pushLog(id, `\x1b[90m# 独立会话 · cwd=${p.workdir} · env 由 Rust 注入\x1b[0m\n`);
-  pushLog(id, `\x1b[32m$\x1b[0m ${p.command}\n`);
+  pushLog(id, `\x1b[32m$\x1b[0m ${p.commands.map((c) => c.cmd).join(' 且 ')}\n`);
   await sleep(600);
   const pid = 18000 + Math.floor(Math.random() * 900);
   setSession(id, { status: 'running', pid, healthOk: true });
@@ -380,7 +377,7 @@ function topo(ids: string[]): string[] {
   const visit = (id: string) => {
     if (seen.has(id) || !set.has(id)) return;
     seen.add(id);
-    const p = projects.find((x) => x.id === id);
+    const p = components.find((x) => x.id === id);
     p?.dependsOn.forEach(visit);
     out.push(id);
   };
@@ -421,12 +418,27 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   switch (cmd) {
     case 'bootstrap':
       return snapshot() as T;
+    case 'save_component': {
+      const p = a.component as Component;
+      const i = components.findIndex((x) => x.id === p.id);
+      if (i >= 0) components[i] = p;
+      else {
+        p.id = p.id || uid('c');
+        components.push(p);
+      }
+      return snapshot() as T;
+    }
+    case 'delete_component': {
+      const i = components.findIndex((x) => x.id === a.id);
+      if (i >= 0) components.splice(i, 1);
+      return snapshot() as T;
+    }
     case 'save_project': {
       const p = a.project as Project;
       const i = projects.findIndex((x) => x.id === p.id);
       if (i >= 0) projects[i] = p;
       else {
-        p.id = p.id || uid('p');
+        p.id = p.id || uid('pj');
         projects.push(p);
       }
       return snapshot() as T;
@@ -434,23 +446,8 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     case 'delete_project': {
       const i = projects.findIndex((x) => x.id === a.id);
       if (i >= 0) projects.splice(i, 1);
-      return snapshot() as T;
-    }
-    case 'save_category': {
-      const c = a.category as Category;
-      const i = categories.findIndex((x) => x.id === c.id);
-      if (i >= 0) categories[i] = c;
-      else {
-        c.id = c.id || uid('c');
-        categories.push(c);
-      }
-      return snapshot() as T;
-    }
-    case 'delete_category': {
-      const i = categories.findIndex((x) => x.id === a.id);
-      if (i >= 0) categories.splice(i, 1);
-      projects.forEach((p) => {
-        if (p.category === a.id) p.category = 'all';
+      components.forEach((c) => {
+        if (c.projectId === a.id) c.projectId = 'all';
       });
       return snapshot() as T;
     }
@@ -472,13 +469,13 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     case 'save_settings':
       Object.assign(settings, a.settings);
       return snapshot() as T;
-    case 'run_project':
+    case 'run_component':
       void startOne(a.id);
       return undefined as T;
-    case 'stop_project':
+    case 'stop_component':
       void stopOne(a.id);
       return undefined as T;
-    case 'restart_project':
+    case 'restart_component':
       void (async () => {
         await stopOne(a.id);
         await startOne(a.id);
@@ -520,7 +517,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         command: t.commands.map((c) => c.cmd).join(' && '),
         workdir: t.workdir,
         ports: [],
-        category: 'template',
+        projectId: 'template',
       };
       emit('ck:session', sessions[id]);
       pushLog(id, `\x1b[32m$\x1b[0m ${sessions[id].command}\n`);
@@ -552,7 +549,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
               { pid: s.pid + 44, ppid: s.pid + 32, name: 'esbuild', cmd: '--service=0.25.0', cpu: 0.3, mem: 64 * 1024 * 1024 },
             ]
           : [],
-        env: Object.entries(projects.find((p) => p.id === a.id)?.env ?? {}).map(([k, v]) => [
+        env: Object.entries(components.find((c) => c.id === a.id)?.env ?? {}).map(([k, v]) => [
           k,
           /SECRET|TOKEN|KEY|PASSWORD/.test(k) ? '••••••••（已脱敏）' : v,
         ]),

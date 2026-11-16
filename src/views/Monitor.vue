@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
 import { copyText } from '../clipboard';
 import { fmtCpu, fmtMem, fmtUptime, statusText } from '../format';
-import { askConfirm, batchIds, categoryName, openBulk, state, toast } from '../store';
+import { askConfirm, batchIds, componentById, openBulk, projectName, state, toast } from '../store';
 import type { ProcessDetail, ProcNode, SessionView } from '../types';
 
 const selected = ref<string | null>(null);
@@ -12,13 +12,13 @@ let timer: number | undefined;
 
 const rows = computed<SessionView[]>(() => {
   const list: SessionView[] = [];
-  for (const p of state.projects) {
-    const s = state.sessions[p.id];
+  for (const c of state.components) {
+    const s = state.sessions[c.id];
     list.push(
       s ?? {
-        id: p.id,
-        name: p.name,
-        kind: 'project',
+        id: c.id,
+        name: c.name,
+        kind: 'component',
         status: 'stopped',
         pid: null,
         startedAt: null,
@@ -26,10 +26,10 @@ const rows = computed<SessionView[]>(() => {
         error: null,
         restarts: 0,
         healthOk: false,
-        command: p.command,
-        workdir: p.workdir,
-        ports: p.ports,
-        category: p.category,
+        command: c.commands.map((x) => x.cmd).join(' 且 '),
+        workdir: c.workdir,
+        ports: c.ports,
+        projectId: c.projectId,
       }
     );
   }
@@ -204,7 +204,7 @@ function dotOf(s: SessionView): string {
               <i class="dot" :class="dotOf(s)"></i>{{ s.name }}
             </span>
           </td>
-          <td class="muted">{{ s.category === 'template' ? '模板' : categoryName(s.category) }}</td>
+          <td class="muted">{{ s.projectId === 'template' ? '模板' : projectName(s.projectId) }}</td>
           <td class="mono">{{ s.pid ?? '—' }}</td>
           <td class="mono">{{ s.ports.length ? s.ports.map((p) => `:${p}`).join(' ') : '—' }}</td>
           <td class="mono">{{ metric(s.id) ? fmtCpu(metric(s.id)!.cpu) : '—' }}</td>

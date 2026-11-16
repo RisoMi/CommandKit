@@ -5,17 +5,17 @@ use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use commandkit_lib::model::{Category, HealthCheck, Policy, Project};
+use commandkit_lib::model::{CommandStep, Component, HealthCheck, Join, Policy, Project};
 use commandkit_lib::supervisor::{expand, shell_invocation, shell_kind, ShellKind, topo_order};
 
-fn project(id: &str, deps: &[&str]) -> Project {
-    Project {
+fn project(id: &str, deps: &[&str]) -> Component {
+    Component {
         id: id.into(),
         name: id.into(),
-        category: "all".into(),
+        project_id: "all".into(),
         stack: String::new(),
         workdir: std::env::temp_dir().display().to_string(),
-        command: "echo ok".into(),
+        commands: vec![CommandStep::new("echo ok", Join::And)],
         env: Default::default(),
         ports: vec![],
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
@@ -219,7 +219,7 @@ fn shell_kind_and_invocation_per_family() {
 #[test]
 fn categories_are_serializable() {
     // 守住 IPC 契约：Category 走 camelCase，前端 types.ts 依赖这一点
-    let c = Category {
+    let c = Project {
         id: "frontend".into(),
         name: "前端".into(),
         order: 1,

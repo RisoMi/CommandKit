@@ -50,10 +50,10 @@ pub fn run() {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 let ids: Vec<String> = {
                     let data = boot_state.data.lock().unwrap();
-                    data.projects
+                    data.components
                         .iter()
-                        .filter(|p| p.auto_start)
-                        .map(|p| p.id.clone())
+                        .filter(|c| c.auto_start)
+                        .map(|c| c.id.clone())
                         .collect()
                 };
                 if !ids.is_empty() {
@@ -100,14 +100,14 @@ pub fn run() {
             commands::bootstrap,
             commands::save_project,
             commands::delete_project,
-            commands::save_category,
-            commands::delete_category,
+            commands::save_component,
+            commands::delete_component,
             commands::save_template,
             commands::delete_template,
             commands::save_settings,
-            commands::run_project,
-            commands::stop_project,
-            commands::restart_project,
+            commands::run_component,
+            commands::stop_component,
+            commands::restart_component,
             commands::run_many,
             commands::stop_many_cmd,
             commands::restart_many,

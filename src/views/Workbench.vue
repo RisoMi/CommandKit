@@ -1,23 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import ProjectCard from '../components/ProjectCard.vue';
+import ComponentCard from '../components/ComponentCard.vue';
 import { fmtCpu, fmtMem } from '../format';
 import {
-  categoryGroups,
   clearSelection,
+  componentGroups,
   openEditor,
   runBatch,
   state,
-  visibleProjects,
+  visibleComponents,
 } from '../store';
 
-const groups = computed(() => categoryGroups());
+const groups = computed(() => componentGroups());
 
 const counts = computed(() => {
-  const list = visibleProjects.value;
+  const list = visibleComponents.value;
   const out = { running: 0, starting: 0, stopped: 0, failed: 0 };
-  for (const p of list) {
-    const st = state.sessions[p.id]?.status ?? 'stopped';
+  for (const c of list) {
+    const st = state.sessions[c.id]?.status ?? 'stopped';
     if (st === 'running') out.running++;
     else if (st === 'starting' || st === 'restarting' || st === 'stopping') out.starting++;
     else if (st === 'failed') out.failed++;
@@ -29,8 +29,8 @@ const counts = computed(() => {
 const totals = computed(() => {
   let cpu = 0;
   let mem = 0;
-  for (const p of visibleProjects.value) {
-    const m = state.metrics[p.id];
+  for (const c of visibleComponents.value) {
+    const m = state.metrics[c.id];
     if (!m) continue;
     cpu += m.cpu;
     mem += m.mem;
@@ -58,15 +58,15 @@ const bulkPct = computed(() => {
     <header class="head">
       <div>
         <h2>项目工作台</h2>
-        <p>每个项目占用独立终端会话，环境变量与工作目录互不影响。</p>
+        <p>左侧按项目管理组件；每个组件占用独立终端会话，环境变量与工作目录互不影响。</p>
       </div>
       <div class="actions">
-        <button class="btn primary" :disabled="!visibleProjects.length" @click="runBatch('run')">一键运行</button>
-        <button class="btn" :disabled="!visibleProjects.length" @click="runBatch('restart')">一键重启</button>
-        <button class="btn danger" :disabled="!visibleProjects.length" @click="runBatch('stop')">
+        <button class="btn primary" :disabled="!visibleComponents.length" @click="runBatch('run')">一键运行</button>
+        <button class="btn" :disabled="!visibleComponents.length" @click="runBatch('restart')">一键重启</button>
+        <button class="btn danger" :disabled="!visibleComponents.length" @click="runBatch('stop')">
           一键停止
         </button>
-        <button class="btn" @click="openEditor()">+ 新建项目</button>
+        <button class="btn" @click="openEditor()">+ 新建组件</button>
       </div>
     </header>
 
@@ -88,26 +88,26 @@ const bulkPct = computed(() => {
       @click="state.view = 'bulk'"
     >
       <strong>批量{{ bulk.kind === 'stop' ? '停止' : bulk.kind === 'restart' ? '重启' : '启动' }}中 · {{ bulk.index + 1 }} / {{ bulk.total }}</strong>
-      <span>按依赖顺序执行，点击查看多终端</span>
+      <span>按依赖顺序执行，点击查看终端</span>
       <div class="progress"><i :style="{ width: `${bulkPct}%` }"></i></div>
       <span class="mono">{{ bulkPct }}%</span>
     </div>
 
     <div v-if="state.selected.length" class="flex" style="font-size: 11px; color: var(--t3)">
-      已选 <b class="mono" style="color: var(--accent)">{{ state.selected.length }}</b> 个项目，批量按钮只作用于选中项
+      已选 <b class="mono" style="color: var(--accent)">{{ state.selected.length }}</b> 个组件，批量按钮只作用于选中项
       <button class="btn xs ghost" @click="clearSelection">清除选择</button>
     </div>
 
     <div v-for="g in groups" :key="g.id">
-      <div class="grouphead">{{ g.name }} <em>· {{ g.projects.length }}</em></div>
+      <div class="grouphead">{{ g.name }} <em>· {{ g.components.length }}</em></div>
       <div class="grid">
-        <ProjectCard v-for="p in g.projects" :key="p.id" :project="p" />
+        <ComponentCard v-for="c in g.components" :key="c.id" :component="c" />
       </div>
     </div>
 
-    <div v-if="!visibleProjects.length" class="empty">
-      该分类下还没有项目。<br />
-      <span class="link" @click="openEditor()">新建一个项目</span>，或在左侧切换到「全部项目」。
+    <div v-if="!visibleComponents.length" class="empty">
+      当前项目下还没有组件。<br />
+      <span class="link" @click="openEditor()">新建一个组件</span>，或在左侧切换到「全部项目」。
     </div>
   </div>
 </template>

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use commandkit_lib::model::{HealthCheck, Policy, Status};
+use commandkit_lib::model::{CommandStep, HealthCheck, Join, Policy, Status};
 use commandkit_lib::state::AppState;
 use commandkit_lib::supervisor::{self, EventSink, NullSink, SpawnSpec};
 
@@ -24,8 +24,9 @@ fn spec(id: &str, command: &str, health: Option<HealthCheck>) -> SpawnSpec {
     SpawnSpec {
         id: id.into(),
         name: id.into(),
-        kind: "project".into(),
-        category: "all".into(),
+        kind: "component".into(),
+        project_id: "all".into(),
+        steps: vec![CommandStep::new(command, Join::And)],
         command: command.into(),
         workdir: std::env::temp_dir().display().to_string(),
         env: BTreeMap::new(),
@@ -43,6 +44,28 @@ fn sink() -> Arc<dyn EventSink> {
 
 fn make_state(tag: &str) -> Arc<AppState> {
     Arc::new(commandkit_lib::state::load_state(temp_root(tag), None))
+}
+
+fn spec_steps(id: &str, steps: Vec<(&str, Join)>) -> SpawnSpec {
+    let mut spec = spec(id, "", None);
+    spec.steps = steps
+        .into_iter()
+        .map(|(cmd, join)| CommandStep::new(cmd, join))
+        .collect();
+    spec.command = spec
+        .steps
+        .iter()
+        .map(|s| s.cmd.clone())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    spec
+}
+
+fn log_text(state: &Arc<AppState>, id: &str) -> String {
+    supervisor::log_snapshot(state, id)
+        .into_iter()
+        .map(|c| c.data)
+        .collect()
 }
 
 async fn wait_status(state: &Arc<AppState>, id: &str, want: Status, timeout_ms: u64) -> bool {
@@ -135,6 +158,83 @@ async fn captures_stderr_only_fast_command() {
         text.contains("fast-err-only"),
         "只写 stderr 的快速命令也必须被捕获：{text:?}"
     );
+}
+
+/// 且：顺序执行，成功继续
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chain_and_runs_all_steps_in_order() {
+    let sink = sink();
+    let state = make_state("chain-and");
+    let spec = spec_steps(
+        "t-and",
+        vec![("echo step-one", Join::And), ("echo step-two", Join::And)],
+    );
+    supervisor::start(sink, state.clone(), spec).await.unwrap();
+    assert!(wait_status(&state, "t-and", Status::Stopped, 15000).await);
+
+    let text = log_text(&state, "t-and");
+    let h1 = text.find("步骤 1/2").expect("应有第 1 步标记");
+    let h2 = text.find("步骤 2/2").expect("应有第 2 步标记");
+    assert!(h1 < h2, "步骤必须按顺序执行：{text}");
+    // 逐行比对：两步各自的 stdout 都要作为独立行出现
+    let lines: Vec<&str> = text.lines().map(|l| l.trim()).collect();
+    assert!(lines.contains(&"step-one"), "第一步应有输出：{text}");
+    assert!(lines.contains(&"step-two"), "第二步应有输出：{text}");
+}
+
+/// 或：上一条失败时改跑备选
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chain_or_runs_fallback_after_failure() {
+    let sink = sink();
+    let state = make_state("chain-or-fail");
+    let spec = spec_steps(
+        "t-or-fail",
+        vec![("exit 7", Join::And), ("echo fallback-ran", Join::Or)],
+    );
+    supervisor::start(sink, state.clone(), spec).await.unwrap();
+    assert!(wait_status(&state, "t-or-fail", Status::Stopped, 15000).await);
+
+    let text = log_text(&state, "t-or-fail");
+    assert!(text.contains("步骤 2/2"), "备选命令应被执行：{text}");
+    assert!(text.contains("fallback-ran"), "备选命令应被执行：{text}");
+    let view = supervisor::get_session(&state, "t-or-fail").unwrap().view();
+    assert_eq!(view.exit_code, Some(0), "整条链以成功收尾");
+}
+
+/// 或：上一条成功时跳过备选
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chain_or_skips_fallback_after_success() {
+    let sink = sink();
+    let state = make_state("chain-or-ok");
+    let spec = spec_steps(
+        "t-or-ok",
+        vec![("echo primary-ok", Join::And), ("echo should-not-run", Join::Or)],
+    );
+    supervisor::start(sink, state.clone(), spec).await.unwrap();
+    assert!(wait_status(&state, "t-or-ok", Status::Stopped, 15000).await);
+
+    let text = log_text(&state, "t-or-ok");
+    assert!(text.contains("primary-ok"), "主命令应执行：{text}");
+    // banner 里也会出现命令文本，用「步骤 2/2」标记判断备选是否真的执行
+    assert!(!text.contains("步骤 2/2"), "成功时不该跑备选：{text}");
+}
+
+/// 且：上一条失败即中止
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chain_and_stops_after_failure() {
+    let sink = sink();
+    let state = make_state("chain-and-fail");
+    let spec = spec_steps(
+        "t-and-fail",
+        vec![("exit 5", Join::And), ("echo never-ran", Join::And)],
+    );
+    supervisor::start(sink, state.clone(), spec).await.unwrap();
+    assert!(wait_status(&state, "t-and-fail", Status::Failed, 15000).await);
+
+    let text = log_text(&state, "t-and-fail");
+    assert!(!text.contains("步骤 2/2"), "失败后不该继续：{text}");
+    let view = supervisor::get_session(&state, "t-and-fail").unwrap().view();
+    assert_eq!(view.exit_code, Some(5));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

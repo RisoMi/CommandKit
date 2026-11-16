@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import ProjectDialog from './components/ProjectDialog.vue';
+import ComponentDialog from './components/ComponentDialog.vue';
 import SideNav from './components/SideNav.vue';
 import TitleBar from './components/TitleBar.vue';
 import BulkRun from './views/BulkRun.vue';
@@ -64,7 +64,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
       </main>
     </div>
 
-    <ProjectDialog v-if="editor.open" />
+    <ComponentDialog v-if="editor.open" />
     <ConfirmDialog v-if="confirmState.open" />
 
     <div class="toasts">

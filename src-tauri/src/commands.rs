@@ -23,8 +23,10 @@ type St<'a> = State<'a, Arc<AppState>>;
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     info: AppInfo,
+    /// 项目（组件分组）
     projects: Vec<Project>,
-    categories: Vec<Category>,
+    /// 组件（可启动单元）
+    components: Vec<Component>,
     templates: Vec<Template>,
     settings: Settings,
     sessions: Vec<SessionView>,
@@ -33,11 +35,11 @@ pub struct Snapshot {
 }
 
 fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
-    let (projects, categories, templates, settings) = {
+    let (projects, components, templates, settings) = {
         let data = state.data.lock().unwrap();
         (
             data.projects.clone(),
-            data.categories.clone(),
+            data.components.clone(),
             data.templates.clone(),
             data.settings.clone(),
         )
@@ -64,7 +66,7 @@ fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
     Snapshot {
         info,
         projects,
-        categories,
+        components,
         templates,
         settings,
         sessions,
@@ -112,25 +114,30 @@ fn expand_home(path: &str) -> String {
     trimmed.to_string()
 }
 
-fn normalize_project(p: &mut Project, categories: &[Category]) -> Result<(), String> {
+fn normalize_component(p: &mut Component, projects: &[Project]) -> Result<(), String> {
     p.name = p.name.trim().to_string();
     if p.name.is_empty() {
-        return Err("项目名称不能为空".into());
+        return Err("组件名称不能为空".into());
     }
-    p.command = p.command.trim().to_string();
-    if p.command.is_empty() {
+    for step in p.commands.iter_mut() {
+        step.cmd = step.cmd.trim().to_string();
+    }
+    p.commands.retain(|s| !s.cmd.is_empty());
+    if p.commands.is_empty() {
         return Err("启动命令不能为空".into());
     }
+    // 第一条命令前不需要连接符
+    p.commands[0].join = Join::And;
     p.workdir = expand_home(&p.workdir);
     if p.workdir.is_empty() {
         return Err("工作目录不能为空".into());
     }
     if p.id.trim().is_empty() {
-        p.id = gen_id("p");
+        p.id = gen_id("c");
     }
     p.id = p.id.trim().to_string();
-    if !categories.iter().any(|c| c.id == p.category) {
-        p.category = "all".into();
+    if !projects.iter().any(|x| x.id == p.project_id) {
+        p.project_id = "all".into();
     }
     p.ports.sort_unstable();
     p.ports.dedup();
@@ -152,43 +159,43 @@ pub fn bootstrap(state: St<'_>) -> Snapshot {
 // ---------------------------------------------------------------- 项目 / 分类
 
 #[tauri::command]
-pub fn save_project(state: St<'_>, mut project: Project) -> Result<Snapshot, String> {
+pub fn save_component(state: St<'_>, mut component: Component) -> Result<Snapshot, String> {
     {
         let mut data = state.data.lock().unwrap();
-        normalize_project(&mut project, &data.categories)?;
-        match data.projects.iter_mut().find(|p| p.id == project.id) {
-            Some(existing) => *existing = project.clone(),
-            None => data.projects.push(project.clone()),
+        normalize_component(&mut component, &data.projects)?;
+        match data.components.iter_mut().find(|c| c.id == component.id) {
+            Some(existing) => *existing = component.clone(),
+            None => data.components.push(component.clone()),
         }
         data.save_projects()
             .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
     }
-    // 让会话列表里显示的名字 / 分类立即跟上（命令本身在下次启动生效）
-    if let Some(session) = { state.sessions.lock().unwrap().get(&project.id).cloned() } {
+    // 让终端里的名字 / 归属立即跟上（命令本身在下次启动生效）
+    if let Some(session) = { state.sessions.lock().unwrap().get(&component.id).cloned() } {
         let mut spec = session.spec.lock().unwrap();
-        spec.name = project.name.clone();
-        spec.category = project.category.clone();
-        spec.ports = project.ports.clone();
-        spec.workdir = project.workdir.clone();
+        spec.name = component.name.clone();
+        spec.project_id = component.project_id.clone();
+        spec.ports = component.ports.clone();
+        spec.workdir = component.workdir.clone();
     }
     Ok(snapshot_of(state.inner()))
 }
 
 #[tauri::command]
-pub fn delete_project(state: St<'_>, id: String) -> Result<Snapshot, String> {
+pub fn delete_component(state: St<'_>, id: String) -> Result<Snapshot, String> {
     {
         let sessions = state.sessions.lock().unwrap();
         if let Some(s) = sessions.get(&id) {
             if s.status().is_active() {
-                return Err("项目正在运行，请先停止再删除".into());
+                return Err("组件正在运行，请先停止再删除".into());
             }
         }
     }
     {
         let mut data = state.data.lock().unwrap();
-        data.projects.retain(|p| p.id != id);
-        for p in data.projects.iter_mut() {
-            p.depends_on.retain(|d| d != &id);
+        data.components.retain(|c| c.id != id);
+        for c in data.components.iter_mut() {
+            c.depends_on.retain(|d| d != &id);
         }
         data.save_projects()
             .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
@@ -199,24 +206,24 @@ pub fn delete_project(state: St<'_>, id: String) -> Result<Snapshot, String> {
 }
 
 #[tauri::command]
-pub fn save_category(state: St<'_>, mut category: Category) -> Result<Snapshot, String> {
+pub fn save_project(state: St<'_>, mut project: Project) -> Result<Snapshot, String> {
     {
         let mut data = state.data.lock().unwrap();
-        category.name = category.name.trim().to_string();
-        if category.name.is_empty() {
-            return Err("分类名称不能为空".into());
+        project.name = project.name.trim().to_string();
+        if project.name.is_empty() {
+            return Err("项目名称不能为空".into());
         }
-        if category.id.trim().is_empty() || category.id == "new" {
-            category.id = gen_id("c");
+        if project.id.trim().is_empty() || project.id == "new" {
+            project.id = gen_id("pj");
         }
-        if category.order == 0 && category.id != "all" {
-            category.order = data.categories.iter().map(|c| c.order).max().unwrap_or(0) + 1;
+        if project.order == 0 && project.id != "all" {
+            project.order = data.projects.iter().map(|p| p.order).max().unwrap_or(0) + 1;
         }
-        match data.categories.iter_mut().find(|c| c.id == category.id) {
-            Some(existing) => *existing = category,
-            None => data.categories.push(category),
+        match data.projects.iter_mut().find(|p| p.id == project.id) {
+            Some(existing) => *existing = project,
+            None => data.projects.push(project),
         }
-        data.categories.sort_by_key(|c| (c.order, c.name.clone()));
+        data.projects.sort_by_key(|p| (p.order, p.name.clone()));
         data.save_projects()
             .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
     }
@@ -224,20 +231,27 @@ pub fn save_category(state: St<'_>, mut category: Category) -> Result<Snapshot, 
 }
 
 #[tauri::command]
-pub fn delete_category(state: St<'_>, id: String) -> Result<Snapshot, String> {
+pub fn delete_project(state: St<'_>, id: String) -> Result<Snapshot, String> {
     if id == "all" {
         return Err("「全部项目」是内置视图，不能删除".into());
     }
     {
         let mut data = state.data.lock().unwrap();
-        data.categories.retain(|c| c.id != id);
-        for p in data.projects.iter_mut() {
-            if p.category == id {
-                p.category = "all".into();
+        data.projects.retain(|p| p.id != id);
+        for c in data.components.iter_mut() {
+            if c.project_id == id {
+                c.project_id = "all".into();
             }
         }
         data.save_projects()
             .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
+    }
+    // 归属变了，同步到已有会话
+    for s in state.sessions.lock().unwrap().values().cloned().collect::<Vec<_>>() {
+        let mut spec = s.spec.lock().unwrap();
+        if spec.project_id == id {
+            spec.project_id = "all".into();
+        }
     }
     Ok(snapshot_of(state.inner()))
 }
@@ -306,15 +320,15 @@ fn emit_toast(app: &AppHandle, level: &str, text: impl Into<String>) {
 
 fn spec_for(state: &Arc<AppState>, id: &str) -> Result<SpawnSpec, String> {
     let data = state.data.lock().unwrap();
-    data.projects
+    data.components
         .iter()
-        .find(|p| p.id == id)
-        .map(supervisor::spec_from_project)
-        .ok_or_else(|| format!("未知项目：{id}"))
+        .find(|c| c.id == id)
+        .map(supervisor::spec_from_component)
+        .ok_or_else(|| format!("未知组件：{id}"))
 }
 
 #[tauri::command]
-pub async fn run_project(
+pub async fn run_component(
     app: AppHandle,
     state: St<'_>,
     id: String,
@@ -325,13 +339,13 @@ pub async fn run_project(
 }
 
 #[tauri::command]
-pub async fn stop_project(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
+pub async fn stop_component(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
     let shared = state.inner().clone();
     supervisor::stop(&sink_of(&app), &shared, &id).await
 }
 
 #[tauri::command]
-pub async fn restart_project(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
+pub async fn restart_component(app: AppHandle, state: St<'_>, id: String) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         if let Err(e) = supervisor::restart(&sink_of(&app), &shared, &id).await {
@@ -351,7 +365,7 @@ pub async fn run_many(
     // 先同步校验依赖图，循环依赖立刻回给调用方
     {
         let data = shared.data.lock().unwrap();
-        supervisor::topo_order(&data.projects, &ids)?;
+        supervisor::topo_order(&data.components, &ids)?;
     }
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -387,7 +401,7 @@ pub async fn restart_many(
     let shared = state.inner().clone();
     {
         let data = shared.data.lock().unwrap();
-        supervisor::topo_order(&data.projects, &ids)?;
+        supervisor::topo_order(&data.components, &ids)?;
     }
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -508,10 +522,10 @@ pub fn open_data_dir(state: St<'_>) -> Result<(), String> {
 pub fn open_workdir(state: St<'_>, id: String) -> Result<(), String> {
     let path = {
         let data = state.data.lock().unwrap();
-        data.projects
+        data.components
             .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.workdir.clone())
+            .find(|c| c.id == id)
+            .map(|c| c.workdir.clone())
     }
     .or_else(|| {
         state
@@ -521,7 +535,7 @@ pub fn open_workdir(state: St<'_>, id: String) -> Result<(), String> {
             .get(&id)
             .map(|s| s.spec.lock().unwrap().workdir.clone())
     })
-    .ok_or_else(|| format!("未知项目：{id}"))?;
+    .ok_or_else(|| format!("未知组件：{id}"))?;
     procs::open_path(&path)
 }
 
@@ -529,11 +543,11 @@ pub fn open_workdir(state: St<'_>, id: String) -> Result<(), String> {
 pub fn open_external_terminal(state: St<'_>, id: String) -> Result<(), String> {
     let path = {
         let data = state.data.lock().unwrap();
-        data.projects
+        data.components
             .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.workdir.clone())
+            .find(|c| c.id == id)
+            .map(|c| c.workdir.clone())
     }
-    .ok_or_else(|| format!("未知项目：{id}"))?;
+    .ok_or_else(|| format!("未知组件：{id}"))?;
     procs::open_terminal(&path)
 }

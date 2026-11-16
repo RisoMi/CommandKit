@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -38,7 +38,7 @@ impl EventSink for NullSink {
     fn emit_event(&self, _event: &str, _payload: serde_json::Value) {}
 }
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
 use crate::model::*;
@@ -53,7 +53,11 @@ pub struct SpawnSpec {
     pub id: String,
     pub name: String,
     pub kind: String,
-    pub category: String,
+    /// 所属项目 id
+    pub project_id: String,
+    /// 命令链（按顺序执行，join 决定衔接方式）
+    pub steps: Vec<CommandStep>,
+    /// 展示用：把命令链拼成一行
     pub command: String,
     pub workdir: String,
     pub env: BTreeMap<String, String>,
@@ -138,7 +142,7 @@ impl Session {
             command: spec.command,
             workdir: spec.workdir,
             ports: spec.ports,
-            category: spec.category,
+            project_id: spec.project_id,
         }
     }
 
@@ -156,19 +160,43 @@ fn emit_session(sink: &Arc<dyn EventSink>, s: &Session) {
 
 // ---------------------------------------------------------------- spec 构造
 
-pub fn spec_from_project(p: &Project) -> SpawnSpec {
+fn join_label(join: Join) -> &'static str {
+    match join {
+        Join::And => "且",
+        Join::Or => "或",
+    }
+}
+
+/// 命令链的可读形式：A 且 B 或 C
+pub fn display_chain(steps: &[CommandStep]) -> String {
+    steps
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if i == 0 {
+                s.cmd.clone()
+            } else {
+                format!(" {} {}", join_label(s.join), s.cmd)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub fn spec_from_component(c: &Component) -> SpawnSpec {
     SpawnSpec {
-        id: p.id.clone(),
-        name: p.name.clone(),
-        kind: "project".into(),
-        category: p.category.clone(),
-        command: p.command.clone(),
-        workdir: p.workdir.clone(),
-        env: p.env.clone(),
-        ports: p.ports.clone(),
-        health: p.health.clone(),
-        policy: p.policy.clone(),
-        shell: p.shell.clone(),
+        id: c.id.clone(),
+        name: c.name.clone(),
+        kind: "component".into(),
+        project_id: c.project_id.clone(),
+        command: display_chain(&c.commands),
+        steps: c.commands.clone(),
+        workdir: c.workdir.clone(),
+        env: c.env.clone(),
+        ports: c.ports.clone(),
+        health: c.health.clone(),
+        policy: c.policy.clone(),
+        shell: c.shell.clone(),
     }
 }
 
@@ -180,11 +208,18 @@ pub fn spec_from_template(t: &Template, shell: String) -> SpawnSpec {
         .map(|c| c.cmd.clone())
         .collect::<Vec<_>>()
         .join(" && ");
+    let steps: Vec<CommandStep> = t
+        .commands
+        .iter()
+        .filter(|c| !c.cmd.trim().is_empty())
+        .map(|c| CommandStep::new(&c.cmd, Join::And))
+        .collect();
     SpawnSpec {
         id: format!("tpl:{}", t.id),
         name: format!("模板 · {}", t.name),
         kind: "template".into(),
-        category: "template".into(),
+        project_id: "template".into(),
+        steps,
         command,
         workdir: t.workdir.clone(),
         env: t.env.clone(),
@@ -346,8 +381,8 @@ fn resolve_shell(spec: &SpawnSpec, shell_setting: &str) -> String {
         })
 }
 
-fn build_command(spec: &SpawnSpec, shell: &str) -> Result<Command, String> {
-    if spec.command.trim().is_empty() {
+fn build_command(spec: &SpawnSpec, shell: &str, command: &str) -> Result<Command, String> {
+    if command.trim().is_empty() {
         return Err("命令为空，无法启动".into());
     }
     if spec.workdir.trim().is_empty() {
@@ -359,7 +394,7 @@ fn build_command(spec: &SpawnSpec, shell: &str) -> Result<Command, String> {
     }
 
     let mut cmd = Command::new(shell);
-    for arg in shell_invocation(shell, &spec.command) {
+    for arg in shell_invocation(shell, command) {
         cmd.arg(arg);
     }
     cmd.current_dir(&workdir);
@@ -508,7 +543,6 @@ pub async fn start(
         data.settings.shell.clone()
     };
     let shell = resolve_shell(&spec, &shell_setting);
-    let mut cmd = build_command(&spec, &shell)?;
 
     let session = {
         let mut sessions = state.sessions.lock().unwrap();
@@ -567,98 +601,214 @@ pub async fn start(
         }
     }
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
+    // 先做一次同步校验：工作目录 / 命令为空这类错误直接回给调用方
+    build_command(&spec, &shell, &spec.steps[0].cmd)?;
+
+    let runner_sink = sink.clone();
+    let runner_state = state.clone();
+    let runner_session = session.clone();
+    let runner_spec = spec.clone();
+    tokio::spawn(async move {
+        run_chain(runner_sink, runner_state, runner_session, runner_spec, shell).await;
+    });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------- 命令链
+
+/// 成功后下一步：跳过紧随其后的「或」备选
+fn next_after_success(steps: &[CommandStep], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    while j < steps.len() && steps[j].join == Join::Or {
+        j += 1;
+    }
+    if j < steps.len() {
+        Some(j)
+    } else {
+        None
+    }
+}
+
+/// 失败后下一步：只有「或」备选才继续
+fn next_after_failure(steps: &[CommandStep], i: usize) -> Option<usize> {
+    match steps.get(i + 1) {
+        Some(s) if s.join == Join::Or => Some(i + 1),
+        _ => None,
+    }
+}
+
+/// 最后一条「主线」命令（后面没有「且」步骤）：健康检查在这条上挂
+fn is_terminal_step(steps: &[CommandStep], i: usize) -> bool {
+    next_after_success(steps, i).is_none()
+}
+
+fn spawn_step(
+    sink: &Arc<dyn EventSink>,
+    session: &Arc<Session>,
+    spec: &SpawnSpec,
+    shell: &str,
+    command: &str,
+) -> Result<Child, String> {
+    let mut cmd = build_command(spec, shell, command)?;
+    match cmd.spawn() {
+        Ok(c) => Ok(c),
         Err(e) => {
             // Win10 常见：只有 Windows PowerShell，没有 pwsh 7 —— 自动回退一次
-            let mut recovered = None;
-            if cfg!(windows) && shell.to_ascii_lowercase().contains("pwsh") {
-                if let Ok(mut alt) = build_command(&spec, "powershell.exe") {
+            if cfg!(windows) && matches!(shell_kind(shell), ShellKind::Pwsh) {
+                if let Ok(mut alt) = build_command(spec, "powershell.exe", command) {
                     if let Ok(c) = alt.spawn() {
                         push_chunk(
-                            &sink,
-                            &session,
+                            sink,
+                            session,
                             "\u{1b}[33m# 未找到 pwsh.exe，已回退 windows powershell\u{1b}[0m\n",
                             "err",
                         );
-                        recovered = Some(c);
+                        return Ok(c);
                     }
                 }
             }
-            match recovered {
-                Some(c) => c,
+            Err(format!("启动失败：{e}"))
+        }
+    }
+}
+
+/// 逐条执行命令链，全部结束后统一收敛会话状态
+async fn run_chain(
+    sink: Arc<dyn EventSink>,
+    state: Arc<AppState>,
+    session: Arc<Session>,
+    spec: SpawnSpec,
+    shell: String,
+) {
+    let steps = spec.steps.clone();
+    let mut idx = 0usize;
+    let mut status: std::io::Result<ExitStatus> = Err(std::io::Error::other("命令链没有执行"));
+
+    loop {
+        if session.inner.lock().unwrap().stopping {
+            break;
+        }
+        let step = steps[idx].clone();
+
+        if steps.len() > 1 {
+            push_chunk(
+                &sink,
+                &session,
+                &format!(
+                    "\u{1b}[90m# 步骤 {}/{} · {}\u{1b}[0m\n",
+                    idx + 1,
+                    steps.len(),
+                    step.cmd
+                ),
+                "out",
+            );
+        } else {
+            push_chunk(
+                &sink,
+                &session,
+                &format!("\u{1b}[32m$\u{1b}[0m {}\n", step.cmd),
+                "out",
+            );
+        }
+
+        let mut child = match spawn_step(&sink, &session, &spec, &shell, &step.cmd) {
+            Ok(c) => c,
+            Err(e) => {
+                {
+                    let mut inner = session.inner.lock().unwrap();
+                    inner.status = Status::Failed;
+                    inner.error = Some(e.clone());
+                    inner.pid = None;
+                    inner.log_file = None;
+                }
+                push_chunk(&sink, &session, &format!("\u{1b}[31m{e}\u{1b}[0m\n"), "err");
+                emit_session(&sink, &session);
+                return;
+            }
+        };
+
+        let pid = child.id();
+        {
+            session.inner.lock().unwrap().pid = pid;
+        }
+
+        if let Some(mut sin) = child.stdin.take() {
+            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+            session.inner.lock().unwrap().stdin = Some(tx);
+            tokio::spawn(async move {
+                while let Some(line) = rx.recv().await {
+                    if sin.write_all(line.as_bytes()).await.is_err() {
+                        break;
+                    }
+                    let _ = sin.flush().await;
+                }
+            });
+        }
+        if let Some(out) = child.stdout.take() {
+            tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
+        }
+        if let Some(err) = child.stderr.take() {
+            tokio::spawn(pump(sink.clone(), session.clone(), err, "err"));
+        }
+
+        // 只有最后一条主线命令才挂健康检查 / 置为运行中
+        if is_terminal_step(&steps, idx) {
+            match spec.health.clone() {
+                Some(hc) => watch_health(sink.clone(), session.clone(), hc),
                 None => {
-                    let msg = format!("启动失败：{e}");
                     {
                         let mut inner = session.inner.lock().unwrap();
-                        inner.status = Status::Failed;
-                        inner.error = Some(msg.clone());
-                        inner.log_file = None;
+                        // 短命令可能在 waiter 里已经收敛为 Stopped，不能覆盖回 Running
+                        if matches!(inner.status, Status::Starting) {
+                            inner.status = Status::Running;
+                            inner.health_ok = true;
+                        }
                     }
-                    push_chunk(&sink, &session, &format!("\u{1b}[31m{msg}\u{1b}[0m\n"), "err");
                     emit_session(&sink, &session);
-                    return Err(msg);
                 }
             }
         }
-    };
 
-    let pid = child.id();
-    {
-        let mut inner = session.inner.lock().unwrap();
-        inner.pid = pid;
-    }
+        status = child.wait().await;
+        let ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdin = child.stdin.take();
+        {
+            let mut inner = session.inner.lock().unwrap();
+            inner.pid = None;
+            inner.stdin = None;
+        }
 
-    if let Some(mut sin) = stdin {
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        session.inner.lock().unwrap().stdin = Some(tx);
-        tokio::spawn(async move {
-            while let Some(line) = rx.recv().await {
-                if sin.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-                let _ = sin.flush().await;
-            }
-        });
-    }
+        if steps.len() > 1 {
+            let code = status.as_ref().ok().and_then(|s| s.code());
+            push_chunk(
+                &sink,
+                &session,
+                &format!(
+                    "\u{1b}[90m# 步骤 {}/{} 结束（{}）\u{1b}[0m\n",
+                    idx + 1,
+                    steps.len(),
+                    code.map(|c| format!("退出码 {c}"))
+                        .unwrap_or_else(|| "无退出码".into())
+                ),
+                "out",
+            );
+        }
 
-    if let Some(out) = stdout {
-        tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
-    }
-    if let Some(err) = stderr {
-        tokio::spawn(pump(sink.clone(), session.clone(), err, "err"));
-    }
-
-    {
-        let sink2 = sink.clone();
-        let state2 = state.clone();
-        let s2 = session.clone();
-        tokio::spawn(async move {
-            let status = child.wait().await;
-            finish(&sink2, &state2, &s2, status).await;
-        });
-    }
-
-    match spec.health.clone() {
-        Some(hc) => watch_health(sink.clone(), session.clone(), hc),
-        None => {
-            {
-                let mut inner = session.inner.lock().unwrap();
-                // 短命令可能在 waiter 里已经收敛为 Stopped，不能覆盖回 Running
-                if matches!(inner.status, Status::Starting) {
-                    inner.status = Status::Running;
-                    inner.health_ok = true;
-                }
-            }
-            emit_session(&sink, &session);
+        if session.inner.lock().unwrap().stopping {
+            break;
+        }
+        match if ok {
+            next_after_success(&steps, idx)
+        } else {
+            next_after_failure(&steps, idx)
+        } {
+            Some(n) => idx = n,
+            None => break,
         }
     }
 
-    Ok(())
+    finish(&sink, &state, &session, status).await;
 }
 
 fn watch_health(sink: Arc<dyn EventSink>, session: Arc<Session>, hc: HealthCheck) {
@@ -945,10 +1095,10 @@ pub async fn restart(
 ) -> Result<(), String> {
     let spec = {
         let data = state.data.lock().unwrap();
-        data.projects
+        data.components
             .iter()
-            .find(|p| p.id == id)
-            .map(spec_from_project)
+            .find(|c| c.id == id)
+            .map(spec_from_component)
     };
     let spec = match spec {
         Some(s) => s,
@@ -993,7 +1143,7 @@ pub fn send_input(state: &Arc<AppState>, id: &str, data: &str) -> Result<(), Str
 
 // ---------------------------------------------------------------- 拓扑排序
 
-pub fn topo_order(projects: &[Project], selected: &[String]) -> Result<Vec<String>, String> {
+pub fn topo_order(components: &[Component], selected: &[String]) -> Result<Vec<String>, String> {
     let set: HashSet<&str> = selected.iter().map(|s| s.as_str()).collect();
     let mut indeg: HashMap<&str, usize> = HashMap::new();
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -1001,7 +1151,7 @@ pub fn topo_order(projects: &[Project], selected: &[String]) -> Result<Vec<Strin
     for id in selected {
         indeg.entry(id.as_str()).or_insert(0);
     }
-    for p in projects.iter().filter(|p| set.contains(p.id.as_str())) {
+    for p in components.iter().filter(|p| set.contains(p.id.as_str())) {
         for dep in &p.depends_on {
             if set.contains(dep.as_str()) && dep != &p.id {
                 adj.entry(dep.as_str()).or_default().push(p.id.as_str());
@@ -1083,12 +1233,12 @@ pub async fn start_many(
 ) -> Result<(), String> {
     let (order, specs) = {
         let data = state.data.lock().unwrap();
-        let order = topo_order(&data.projects, &ids)?;
+        let order = topo_order(&data.components, &ids)?;
         let specs: HashMap<String, SpawnSpec> = data
-            .projects
+            .components
             .iter()
-            .filter(|p| ids.iter().any(|i| i == &p.id))
-            .map(|p| (p.id.clone(), spec_from_project(p)))
+            .filter(|c| ids.iter().any(|i| i == &c.id))
+            .map(|c| (c.id.clone(), spec_from_component(c)))
             .collect();
         (order, specs)
     };
@@ -1182,7 +1332,7 @@ pub async fn stop_many(
 ) -> Result<(), String> {
     let mut order = {
         let data = state.data.lock().unwrap();
-        topo_order(&data.projects, &ids).unwrap_or_else(|_| ids.clone())
+        topo_order(&data.components, &ids).unwrap_or_else(|_| ids.clone())
     };
     order.reverse(); // 停止按依赖逆序
 

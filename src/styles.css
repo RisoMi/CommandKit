@@ -757,6 +757,11 @@ input[type="radio"] {
   flex: 1;
   min-width: 0;
 }
+/* 按钮不要被 .row 拉成等分宽度 */
+.row > .btn,
+.row > button {
+  flex: none;
+}
 .check {
   display: inline-flex;
   align-items: center;
@@ -1090,6 +1095,10 @@ table.p td.mono {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* 可滚动列里子元素默认会被压缩（依赖列表被挤扁），统一禁止收缩 */
+.modal-b > * {
+  flex: none;
 }
 .modal-f {
   display: flex;

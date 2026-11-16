@@ -14,25 +14,27 @@ pub struct DataStore {
     pub templates_file: JsonFile,
     pub settings_file: JsonFile,
     pub snapshot_file: JsonFile,
+    /// 项目（组件分组）
     pub projects: Vec<Project>,
-    pub categories: Vec<Category>,
+    /// 组件（可启动单元）
+    pub components: Vec<Component>,
     pub templates: Vec<Template>,
     pub settings: Settings,
 }
 
 impl DataStore {
-    /// 分类与项目同存 projects.json：整目录迁移时只有一个真相源
+    /// 项目与组件同存 projects.json：整目录迁移时只有一个真相源
     pub fn save_projects(&self) -> std::io::Result<()> {
         #[derive(serde::Serialize)]
         struct Bundle<'a> {
             version: u32,
-            categories: &'a Vec<Category>,
             projects: &'a Vec<Project>,
+            components: &'a Vec<Component>,
         }
         self.projects_file.write(&Bundle {
-            version: 1,
-            categories: &self.categories,
+            version: 2,
             projects: &self.projects,
+            components: &self.components,
         })
     }
     pub fn save_templates(&self) -> std::io::Result<()> {
@@ -66,12 +68,80 @@ pub fn sanitize_id(id: &str) -> String {
         .collect()
 }
 
+/// v1 的组件结构（当时叫 project，字段叫 category / command）
 #[derive(serde::Deserialize, Default)]
-struct ProjectBundle {
+#[serde(rename_all = "camelCase")]
+struct LegacyComponent {
+    id: String,
+    name: String,
     #[serde(default)]
-    projects: Vec<Project>,
+    category: String,
     #[serde(default)]
-    categories: Vec<Category>,
+    stack: String,
+    #[serde(default)]
+    workdir: String,
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    ports: Vec<u16>,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    #[serde(default)]
+    health: Option<HealthCheck>,
+    #[serde(default)]
+    policy: Policy,
+    #[serde(default)]
+    auto_start: bool,
+    #[serde(default)]
+    shell: Option<String>,
+    #[serde(default)]
+    note: String,
+}
+
+impl LegacyComponent {
+    fn into_component(self) -> Component {
+        Component {
+            id: self.id,
+            name: self.name,
+            project_id: if self.category.is_empty() {
+                "all".to_string()
+            } else {
+                self.category
+            },
+            stack: self.stack,
+            workdir: self.workdir,
+            commands: if self.command.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![CommandStep::new(&self.command, Join::And)]
+            },
+            env: self.env,
+            ports: self.ports,
+            depends_on: self.depends_on,
+            health: self.health,
+            policy: self.policy,
+            auto_start: self.auto_start,
+            shell: self.shell,
+            note: self.note,
+        }
+    }
+}
+
+/// 读 projects.json：v2 直接解析，v1（categories + projects）就地迁移
+fn parse_bundle(raw: &serde_json::Value) -> (Vec<Project>, Vec<Component>) {
+    let version = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
+    let take = |key: &str| raw.get(key).cloned().unwrap_or(serde_json::Value::Array(vec![]));
+    if version >= 2 {
+        let projects: Vec<Project> = serde_json::from_value(take("projects")).unwrap_or_default();
+        let components: Vec<Component> = serde_json::from_value(take("components")).unwrap_or_default();
+        (projects, components)
+    } else {
+        let projects: Vec<Project> = serde_json::from_value(take("categories")).unwrap_or_default();
+        let legacy: Vec<LegacyComponent> = serde_json::from_value(take("projects")).unwrap_or_default();
+        (projects, legacy.into_iter().map(|l| l.into_component()).collect())
+    }
 }
 
 pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
@@ -83,18 +153,18 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
     let settings_file = JsonFile::new(&root, "settings.json");
     let snapshot_file = JsonFile::new(&root, "process-snapshot.json");
 
-    let bundle: ProjectBundle = projects_file.read_or();
+    let raw: serde_json::Value = projects_file.read_or();
     let settings: Settings = settings_file.read_or();
 
-    let mut projects = bundle.projects;
-    let mut categories = bundle.categories;
-    if categories.is_empty() {
-        categories = seed_categories();
+    let (mut projects, mut components) = parse_bundle(&raw);
+    if projects.is_empty() {
+        projects = seed_projects();
     }
-    let first_run = !projects_file.path().exists() && projects.is_empty();
+    let first_run = !projects_file.path().exists() && components.is_empty();
     if first_run {
-        projects = seed_projects(&root);
+        components = seed_components(&root);
     }
+    let migrated = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(1) < 2 && !components.is_empty();
 
     let templates: Vec<Template> = templates_file.read_or();
     let templates = if templates.is_empty() {
@@ -109,11 +179,11 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
         settings_file,
         snapshot_file,
         projects,
-        categories,
+        components,
         templates,
         settings,
     };
-    if first_run {
+    if first_run || migrated {
         let _ = store.save_projects();
         let _ = store.save_templates();
         let _ = store.save_settings();
@@ -130,33 +200,33 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
     }
 }
 
-fn seed_categories() -> Vec<Category> {
+fn seed_projects() -> Vec<Project> {
     vec![
-        Category {
+        Project {
             id: "all".into(),
             name: "全部项目".into(),
             order: 0,
             color: None,
         },
-        Category {
+        Project {
             id: "frontend".into(),
             name: "前端".into(),
             order: 1,
             color: Some("#5B9DFF".into()),
         },
-        Category {
+        Project {
             id: "backend".into(),
             name: "后端".into(),
             order: 2,
             color: Some("#9EFF00".into()),
         },
-        Category {
+        Project {
             id: "middleware".into(),
             name: "中间件".into(),
             order: 3,
             color: Some("#E8A33D".into()),
         },
-        Category {
+        Project {
             id: "data".into(),
             name: "数据服务".into(),
             order: 4,
@@ -165,7 +235,7 @@ fn seed_categories() -> Vec<Category> {
     ]
 }
 
-fn seed_projects(root: &std::path::Path) -> Vec<Project> {
+fn seed_components(root: &std::path::Path) -> Vec<Component> {
     let home = store::home_dir().unwrap_or_else(|| root.to_path_buf());
     let home_str = home.display().to_string();
     let (tick_cmd, server_cmd) = if cfg!(target_os = "windows") {
@@ -180,17 +250,20 @@ fn seed_projects(root: &std::path::Path) -> Vec<Project> {
         )
     };
     vec![
-        Project {
+        Component {
             id: "demo-envcheck".into(),
             name: "环境自检".into(),
-            category: "frontend".into(),
+            project_id: "frontend".into(),
             stack: if cfg!(windows) { "PowerShell 7" } else { "zsh" }.into(),
             workdir: home_str.clone(),
-            command: if cfg!(windows) {
-                "node -v; npm -v; $PSVersionTable.PSVersion".into()
-            } else {
-                "node -v; npm -v; sw_vers -productVersion".into()
-            },
+            commands: vec![CommandStep::new(
+                if cfg!(windows) {
+                    "node -v; npm -v; $PSVersionTable.PSVersion"
+                } else {
+                    "node -v; npm -v; sw_vers -productVersion"
+                },
+                Join::And,
+            )],
             env: Default::default(),
             ports: vec![],
             depends_on: vec![],
@@ -200,13 +273,13 @@ fn seed_projects(root: &std::path::Path) -> Vec<Project> {
             shell: None,
             note: "示例项目：验证子 shell、环境注入与退出码回传。".into(),
         },
-        Project {
+        Component {
             id: "demo-server".into(),
             name: "本地静态服务".into(),
-            category: "backend".into(),
+            project_id: "backend".into(),
             stack: if cfg!(windows) { "Python" } else { "Python 3" }.into(),
             workdir: home_str.clone(),
-            command: server_cmd,
+            commands: vec![CommandStep::new(&server_cmd, Join::And)],
             env: Default::default(),
             ports: vec![8899],
             depends_on: vec![],
@@ -220,13 +293,13 @@ fn seed_projects(root: &std::path::Path) -> Vec<Project> {
             shell: None,
             note: "示例项目：端口健康检查通过后才置为运行中。".into(),
         },
-        Project {
+        Component {
             id: "demo-worker".into(),
             name: "日志流演示".into(),
-            category: "middleware".into(),
+            project_id: "middleware".into(),
             stack: "shell".into(),
             workdir: home_str,
-            command: tick_cmd,
+            commands: vec![CommandStep::new(&tick_cmd, Join::And)],
             env: Default::default(),
             ports: vec![],
             depends_on: vec![],

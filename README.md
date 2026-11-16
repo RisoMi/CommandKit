@@ -2,7 +2,8 @@
 
 [![build](https://github.com/RisoMi/CommandKit/actions/workflows/build.yml/badge.svg)](https://github.com/RisoMi/CommandKit/actions/workflows/build.yml)
 
-命令环境模板 + 多项目进程管理桌面应用。Tauri 2（Rust 进程监管 + Vue 3 前端），
+命令环境模板 + 多项目进程管理桌面应用。**项目（组件分组）→ 组件（启动单元）** 两级模型，
+Tauri 2（Rust 进程监管 + Vue 3 前端），
 Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Application Support/CommandKit/`）。
 
 对应设计稿：`CommandKit · 命令环境模板管理`（Ardot fileId 746898820539136）
@@ -118,7 +119,22 @@ shell 家族决定参数形式（`supervisor::shell_invocation`，有单测覆�
 | POSIX（zsh / bash / sh） | `<shell> -lc "<command>"` | 登录 shell，确保 Finder 启动时也能拿到用户 PATH |
 
 - **默认 shell**：设置 → 运行 → 默认 shell（下拉，Windows 给 pwsh / powershell / cmd，macOS 给 zsh / bash / sh，也可填自定义路径）。
-- **项目级覆盖**：编辑项目 → 执行 shell，可选「跟随设置」或单独指定；模板同理。
+- **组件级覆盖**：编辑组件 → 执行 shell，可选「跟随设置」或单独指定；模板同理。
+
+### 3.2 命令链（且 / 或）
+
+组件的启动命令是一个**有序步骤列表**，步骤之间用「且 / 或」连接（`CommandStep { cmd, join }`）：
+
+| 连接 | 语义 |
+| --- | --- |
+| 且 | 上一条**成功**后继续；上一条失败则按失败策略处理（默认中止） |
+| 或 | 上一条**失败**时才跑这一条（备选）；上一条成功则跳过 |
+
+- 例：`npm ci` 且 `npm run dev` —— 装依赖成功才启动服务；
+  `pnpm i` 且 `npm run dev` 或 `yarn dev` —— 前两条失败时改跑 `yarn dev`。
+- 每一步在独立子 shell 里跑，输出进同一个会话（终端里以 `# 步骤 1/2` 分隔）。
+- **健康检查挂在最后一条主线命令**（后面没有「且」步骤的那条）上，前面的构建步骤不触发健康检查。
+- 整条链以最后一步的退出码收尾；任一步失败且没有「或」备选，会话即 `Failed`。
 
 Windows 上 `pwsh.exe` 不存在时会自动回退 `powershell.exe` 并在终端里提示一行。
 
@@ -190,11 +206,11 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 | 命令 | 作用 |
 | --- | --- |
 | `bootstrap` | 返回全量快照（info / projects / categories / templates / settings / sessions / metrics / bulk） |
-| `save_project` `delete_project` | 项目增改删（返回新快照） |
-| `save_category` `delete_category` | 分类增改删（删除时项目回到未分类） |
+| `save_project` `delete_project` | **项目**（组件分组）增改删（删除时组件回到「未归属」） |
+| `save_component` `delete_component` | **组件**增改删（返回新快照） |
 | `save_template` `delete_template` | 模板增改删 |
 | `save_settings` | 设置保存（行数 300~20000 夹取，刷新 500~10000ms 夹取） |
-| `run_project` `stop_project` `restart_project` | 单条操作 |
+| `run_component` `stop_component` `restart_component` | 单个组件操作 |
 | `run_many` `stop_many_cmd` `restart_many` `cancel_bulk_cmd` | 批量操作（拓扑编排，进度走 `ck:bulk` 事件） |
 | `run_template` | 以 `tpl:<id>` 为会话 id 运行模板 |
 | `send_input_cmd` | 向会话 stdin 写入 |

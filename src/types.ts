@@ -21,13 +21,29 @@ export interface Policy {
   maxRestarts: number;
 }
 
+export type Join = 'and' | 'or';
+
+export interface CommandStep {
+  cmd: string;
+  join: Join;
+}
+
+/** 项目：组件的分组容器 */
 export interface Project {
   id: string;
   name: string;
-  category: string;
+  order?: number;
+  color?: string | null;
+}
+
+/** 组件：可启动单元 */
+export interface Component {
+  id: string;
+  name: string;
+  projectId: string;
   stack: string;
   workdir: string;
-  command: string;
+  commands: CommandStep[];
   env: Record<string, string>;
   ports: number[];
   dependsOn: string[];
@@ -36,13 +52,6 @@ export interface Project {
   autoStart: boolean;
   shell: string | null;
   note: string;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  order: number;
-  color: string | null;
 }
 
 export interface TemplateCommand {
@@ -85,7 +94,7 @@ export interface SessionView {
   command: string;
   workdir: string;
   ports: number[];
-  category: string;
+  projectId: string;
 }
 
 export interface MetricRow {
@@ -146,7 +155,7 @@ export interface AppInfo {
 export interface Snapshot {
   info: AppInfo;
   projects: Project[];
-  categories: Category[];
+  components: Component[];
   templates: Template[];
   settings: Settings;
   sessions: SessionView[];

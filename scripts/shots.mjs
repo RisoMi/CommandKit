@@ -56,11 +56,17 @@ await page.screenshot({ path: join(OUT, '01-workbench.png') });
 await page.getByRole('button', { name: '一键运行' }).click();
 // 一键运行后应自动切到批量运行页（不能靠手动点导航）
 await page.waitForTimeout(1500);
-const autoSwitched = await page.getByText('批量运行 · 多终端').count();
-if (!autoSwitched) throw new Error('一键运行后没有自动切到批量运行页');
-// 一键运行时，队列里的项目即使还没启动也必须出现在页签里（否则切不过去）
+const heading = await page.locator('.head h2').first().innerText();
+if (heading.trim() !== '终端') throw new Error(`一键运行后没有自动切到终端页：${heading}`);
+// 会话列表应按「项目」聚合：一键运行后至少有两个项目分组
+const groupCount = await page.locator('.side .side-session').count();
+if (groupCount < 2) throw new Error(`终端会话应按项目分组，实际只有 ${groupCount} 个`);
+
+// 选中「前端」项目：它下面有 2 个组件，页签应跟着变成 2 个
+await page.locator('.side-session', { hasText: '前端' }).first().click();
+await page.waitForTimeout(300);
 const tabCount = await page.locator('.tab').count();
-if (tabCount < 3) throw new Error(`批量运行页签数量不对：${tabCount}`);
+if (tabCount !== 2) throw new Error(`「前端」项目下应有 2 个组件页签，实际 ${tabCount}`);
 await page.screenshot({ path: join(OUT, '02-bulk.png') });
 
 // 点最后一个页签：命令行与终端内容必须跟着切换
@@ -79,10 +85,10 @@ await page.waitForTimeout(2600);
 await page.screenshot({ path: join(OUT, '03-bulk-done.png') });
 
 // 切换标签：终端内容必须跟着换，不能残留上一个会话的缓冲
-await page.locator('.tab', { hasText: 'fishery-agent' }).first().click();
+await page.locator('.tab', { hasText: 'fishery-web' }).first().click();
 await page.waitForTimeout(400);
 const termText = await page.locator('.term').first().innerText();
-if (!termText.includes('fishery-agent')) {
+if (!termText.includes('ocean-fishery-code/web')) {
   throw new Error(`切换标签后终端内容未更新：${termText.slice(0, 120)}`);
 }
 
@@ -95,7 +101,7 @@ if (!termText.includes('应用启动完成')) {
 await page.getByRole('button', { name: '复制输出' }).click();
 await page.waitForTimeout(300);
 const clip = await page.evaluate(() => navigator.clipboard.readText());
-if (!clip.includes('fishery-agent') || clip.includes('\u001b[')) {
+if (!clip.includes('ocean-fishery-code/web') || clip.includes('\u001b[')) {
   throw new Error(`复制内容不正确：${clip.slice(0, 120)}`);
 }
 await page.screenshot({ path: join(OUT, '03b-term-switch.png') });
@@ -118,7 +124,7 @@ await page.screenshot({ path: join(OUT, '06-settings.png') });
 // 项目编辑弹层
 await page.getByText('项目工作台', { exact: true }).first().click();
 await page.waitForTimeout(300);
-await page.getByRole('button', { name: '+ 新建项目' }).click();
+await page.getByRole('button', { name: '+ 新建组件' }).click();
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(OUT, '07-dialog.png') });
 await page.keyboard.press('Escape');
@@ -138,7 +144,7 @@ const lightCtx = await browser.newContext({
 const lightPage = await lightCtx.newPage();
 await lightPage.goto('http://127.0.0.1:4599/', { waitUntil: 'networkidle' });
 await lightPage.waitForTimeout(800);
-await lightPage.getByRole('button', { name: '+ 新建项目' }).click();
+await lightPage.getByRole('button', { name: '+ 新建组件' }).click();
 await lightPage.waitForTimeout(400);
 await lightPage.screenshot({ path: join(OUT, '09-dialog-light.png') });
 
