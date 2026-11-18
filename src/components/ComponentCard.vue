@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { api } from '../api';
-import { fmtCpu, fmtUptime, portText, statusText } from '../format';
+import { fmtCpu, portText, statusText, uptimeOf } from '../format';
 import {
   deleteComponentById,
   openBulk,
@@ -22,7 +22,11 @@ const status = computed<Status>(() => (session.value?.status ?? 'stopped') as St
 const metric = computed(() => state.metrics[props.component.id]);
 const selected = computed(() => state.selected.includes(props.component.id));
 
-const uptime = computed(() => fmtUptime(session.value?.startedAt, state.now));
+const uptime = computed(() =>
+  session.value
+    ? uptimeOf(session.value, state.now)
+    : '—'
+);
 const meta = computed(() => {
   const port = portText(props.component.ports);
   return port ? `${props.component.workdir} · ${port}` : props.component.workdir;

@@ -111,10 +111,23 @@ await page.getByText('进程监管', { exact: true }).first().click();
 await page.waitForTimeout(900);
 await page.screenshot({ path: join(OUT, '04-monitor.png') });
 
-// 模板库
-await page.getByText('模板库', { exact: true }).first().click();
-await page.waitForTimeout(500);
+// 从模板新建（原「模板库」已并入项目工作台）
+await page.getByText('项目工作台', { exact: true }).first().click();
+await page.waitForTimeout(400);
+await page.getByRole('button', { name: '从模板新建' }).click();
+await page.waitForTimeout(400);
+const tplRows = await page.locator('.tplrow').count();
+if (!tplRows) throw new Error('从模板新建弹层没有模板条目');
 await page.screenshot({ path: join(OUT, '05-templates.png') });
+
+// 模板直接运行：终端左侧应出现「模板运行」会话（曾经完全看不到）
+await page.locator('.tplrow').first().getByRole('button', { name: '直接运行' }).click();
+await page.waitForTimeout(700);
+const tplGroup = await page.locator('.side-session', { hasText: '模板运行' }).count();
+if (!tplGroup) throw new Error('模板运行后，终端里没有「模板运行」会话');
+const tplTabs = await page.locator('.tab').count();
+if (!tplTabs) throw new Error('模板运行后，终端没有页签');
+await page.screenshot({ path: join(OUT, '05b-template-run.png') });
 
 // 设置
 await page.getByText('设置', { exact: true }).first().click();

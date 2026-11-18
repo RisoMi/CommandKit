@@ -187,6 +187,7 @@ const sessions: Record<string, SessionView> = {
     status: 'running',
     pid: 18422,
     startedAt: t0 - 5046000,
+    endedAt: null,
     exitCode: null,
     error: null,
     restarts: 0,
@@ -203,6 +204,7 @@ const sessions: Record<string, SessionView> = {
     status: 'starting',
     pid: null,
     startedAt: t0 - 18000,
+    endedAt: null,
     exitCode: null,
     error: null,
     restarts: 0,
@@ -219,6 +221,7 @@ const sessions: Record<string, SessionView> = {
     status: 'running',
     pid: 18104,
     startedAt: t0 - 5201000,
+    endedAt: null,
     exitCode: null,
     error: null,
     restarts: 0,
@@ -235,6 +238,7 @@ const sessions: Record<string, SessionView> = {
     status: 'running',
     pid: 17980,
     startedAt: t0 - 5292000,
+    endedAt: null,
     exitCode: null,
     error: null,
     restarts: 0,
@@ -251,6 +255,7 @@ const sessions: Record<string, SessionView> = {
     status: 'running',
     pid: 17502,
     startedAt: t0 - 5515000,
+    endedAt: null,
     exitCode: null,
     error: null,
     restarts: 0,
@@ -267,6 +272,7 @@ const sessions: Record<string, SessionView> = {
     status: 'stopped',
     pid: null,
     startedAt: null,
+    endedAt: null,
     exitCode: 0,
     error: null,
     restarts: 0,
@@ -309,7 +315,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.1.9',
+      version: '1.2.0',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -499,6 +505,28 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         emit('ck:bulk', structuredClone(bulk));
       }
       return undefined as T;
+    case 'export_components':
+      return `data/exports/components-${Date.now()}.json` as T;
+    case 'import_components': {
+      const demo: Component = {
+        id: uid('c'),
+        name: '导入示例',
+        projectId: projects[1]?.id ?? 'all',
+        stack: 'imported',
+        workdir: '~/work/imported',
+        commands: [{ cmd: 'echo imported', join: 'and' }],
+        env: {},
+        ports: [],
+        dependsOn: [],
+        health: null,
+        policy: { failFast: true, restartOnCrash: false, maxRestarts: 2 },
+        autoStart: false,
+        shell: null,
+        note: '演示：浏览器模式下的导入占位',
+      };
+      components.push(demo);
+      return { imported: 1, skipped: [], snapshot: snapshot() } as T;
+    }
     case 'run_template': {
       const t = templates.find((x) => x.id === a.id);
       if (!t) throw new Error('未知模板');
@@ -510,6 +538,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         status: 'starting',
         pid: null,
         startedAt: now(),
+        endedAt: null,
         exitCode: null,
         error: null,
         restarts: 0,

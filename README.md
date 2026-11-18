@@ -7,7 +7,7 @@ Tauri 2（Rust 进程监管 + Vue 3 前端），
 Windows 便携版（exe 同目录 `data\`）+ macOS 常规版（`~/Library/Application Support/CommandKit/`）。
 
 对应设计稿：`CommandKit · 命令环境模板管理`（Ardot fileId 746898820539136）
-—— 01/05 模板库、07 项目工作台、08 批量运行、09 进程监管。
+—— 07 项目工作台、08 批量运行、09 进程监管（模板库已并入项目工作台）。
 
 ![项目工作台](docs/screenshots/workbench.png)
 
@@ -201,6 +201,16 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 
 ---
 
+## 4.6 组件配置导入 / 导出
+
+- **导出**：工作台勾选组件（单选或多选）→ 工具栏「导出配置 (N)」→ 选保存路径，得到
+  `{ app, kind: "components", version: 1, exportedAt, components: [...] }`。
+- **导入**：工具栏「导入配置」→ 选 JSON → 追加到对应项目。兼容三种形态：
+  上面的导出文件、组件数组、单个组件对象。
+- 导入冲突处理：id 已存在则重新分配（依赖关系跟着改写）、同项目重名加「(导入)」后缀、
+  未知项目归到「未归属」、缺名称或缺命令的条目跳过并在结果里报告。
+- 依赖 `tauri-plugin-dialog` 提供原生保存 / 打开对话框。
+
 ## 5. IPC 命令一览
 
 | 命令 | 作用 |
@@ -208,7 +218,8 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 | `bootstrap` | 返回全量快照（info / projects / categories / templates / settings / sessions / metrics / bulk） |
 | `save_project` `delete_project` | **项目**（组件分组）增改删（删除时组件回到「未归属」） |
 | `save_component` `delete_component` | **组件**增改删（返回新快照） |
-| `save_template` `delete_template` | 模板增改删 |
+| `save_template` `delete_template` | 模板增改删（模板在「项目工作台 → 从模板新建」里使用） |
+| `export_components` `import_components` | 组件配置导出 / 导入（JSON，支持单选与多选） |
 | `save_settings` | 设置保存（行数 300~20000 夹取，刷新 500~10000ms 夹取） |
 | `run_component` `stop_component` `restart_component` | 单个组件操作 |
 | `run_many` `stop_many_cmd` `restart_many` `cancel_bulk_cmd` | 批量操作（拓扑编排，进度走 `ck:bulk` 事件） |
@@ -238,7 +249,7 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 
 | 按键 | 作用 |
 | --- | --- |
-| `⌘/Ctrl + 1..5` | 切换 项目工作台 / 批量运行 / 模板库 / 进程监管 / 设置 |
+| `⌘/Ctrl + 1..4` | 切换 项目工作台 / 终端 / 进程监管 / 设置 |
 | `Esc` | 关闭弹层 / 取消确认 |
 
 ---
@@ -284,7 +295,7 @@ commandkit/
 | --- | --- |
 | ![](docs/screenshots/workbench.png) | ![](docs/screenshots/bulk-run.png) |
 
-| 09 进程监管 | 05 模板库 |
+| 09 进程监管 | 从模板新建组件 |
 | --- | --- |
 | ![](docs/screenshots/monitor.png) | ![](docs/screenshots/templates.png) |
 

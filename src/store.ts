@@ -315,10 +315,7 @@ export function terminalGroups(): TerminalGroup[] {
   };
   const b = state.bulk;
   if (b && !b.finished) b.order.forEach(add);
-  for (const s of Object.values(state.sessions)) {
-    if (s.kind === 'template') continue;
-    add(s.id);
-  }
+  for (const s of Object.values(state.sessions)) add(s.id);
   return out;
 }
 

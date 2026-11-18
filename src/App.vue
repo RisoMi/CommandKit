@@ -7,12 +7,11 @@ import TitleBar from './components/TitleBar.vue';
 import BulkRun from './views/BulkRun.vue';
 import Monitor from './views/Monitor.vue';
 import SettingsView from './views/SettingsView.vue';
-import Templates from './views/Templates.vue';
 import Workbench from './views/Workbench.vue';
 import { bootstrapApp, closeEditor, confirmState, editor, resolveConfirm, state } from './store';
 import type { ViewKey } from './types';
 
-const ORDER: ViewKey[] = ['workbench', 'bulk', 'templates', 'monitor', 'settings'];
+const ORDER: ViewKey[] = ['workbench', 'bulk', 'monitor', 'settings'];
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
@@ -27,7 +26,7 @@ function onKey(e: KeyboardEvent) {
     }
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && /^[1-5]$/.test(e.key)) {
+  if ((e.metaKey || e.ctrlKey) && /^[1-4]$/.test(e.key)) {
     const idx = Number(e.key) - 1;
     if (ORDER[idx]) {
       state.view = ORDER[idx];
@@ -57,7 +56,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         <template v-else>
           <Workbench v-if="state.view === 'workbench'" />
           <BulkRun v-else-if="state.view === 'bulk'" />
-          <Templates v-else-if="state.view === 'templates'" />
           <Monitor v-else-if="state.view === 'monitor'" />
           <SettingsView v-else />
         </template>

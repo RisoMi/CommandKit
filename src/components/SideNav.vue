@@ -15,7 +15,6 @@ import type { Project, ViewKey } from '../types';
 const NAV: { key: ViewKey; label: string }[] = [
   { key: 'workbench', label: '项目工作台' },
   { key: 'bulk', label: '终端' },
-  { key: 'templates', label: '模板库' },
   { key: 'monitor', label: '进程监管' },
   { key: 'settings', label: '设置' },
 ];
@@ -95,10 +94,6 @@ async function removeProject(p: Project) {
   }
 }
 
-function pickTemplate(id: string) {
-  state.activeTemplateId = id;
-  state.view = 'templates';
-}
 </script>
 
 <template>
@@ -160,22 +155,6 @@ function pickTemplate(id: string) {
         <em class="cnt">{{ g.components.length }}</em>
       </div>
       <div v-if="!groups.length" class="sidefoot">还没有会话，从工作台点「一键运行」或单个「运行」。</div>
-    </template>
-
-    <!-- 模板库 -->
-    <template v-else-if="state.view === 'templates'">
-      <div class="sidehead">
-        <span>全部模板</span><span>{{ state.templates.length }}</span>
-      </div>
-      <div
-        v-for="t in state.templates"
-        :key="t.id"
-        class="side-session"
-        :class="{ active: state.activeTemplateId === t.id }"
-        @click="pickTemplate(t.id)"
-      >
-        <span class="nm">{{ t.name }}</span>
-      </div>
     </template>
 
     <!-- 进程监管 -->

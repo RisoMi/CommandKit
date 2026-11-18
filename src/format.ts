@@ -1,3 +1,14 @@
+/** 运行时长：进行中随时钟增长，结束后冻结；没有结束时间戳的已停会话显示 — */
+export function uptimeOf(
+  s: { startedAt: number | null; endedAt: number | null; status: string },
+  now: number
+): string {
+  if (!s.startedAt) return '—';
+  const active = ['starting', 'running', 'restarting', 'stopping'].includes(s.status);
+  if (!active && !s.endedAt) return '—';
+  return fmtUptime(s.startedAt, s.endedAt ?? now);
+}
+
 export function fmtUptime(startedAt: number | null | undefined, now: number): string {
   if (!startedAt) return '—';
   const sec = Math.max(0, Math.floor((now - startedAt) / 1000));

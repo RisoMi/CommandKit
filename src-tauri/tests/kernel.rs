@@ -216,6 +216,82 @@ fn shell_kind_and_invocation_per_family() {
     assert_eq!(shell_kind("PowerShell.exe"), ShellKind::PowerShell);
 }
 
+/// 导出 → 导入：id 冲突要重新分配，dependsOn 要跟着改写，重名加后缀
+#[test]
+fn export_then_import_roundtrip() {
+    use commandkit_lib::state::load_state;
+    use commandkit_lib::transfer::{export_to, import_text};
+
+    let root = std::env::temp_dir().join(format!("ck-transfer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let state = std::sync::Arc::new(load_state(root.clone(), None));
+
+    // 造两个互相依赖的组件
+    {
+        let mut data = state.data.lock().unwrap();
+        data.components.clear();
+        let mut a = project("alpha", &[]);
+        a.name = "alpha".into();
+        let mut b = project("beta", &["alpha"]);
+        b.name = "beta".into();
+        data.components.push(a);
+        data.components.push(b);
+    }
+
+    let file = root.join("out.json");
+    let n = export_to(&state, &[], file.to_str().unwrap()).unwrap();
+    assert_eq!(n, 2, "应导出 2 个组件");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"components\"") && text.contains("alpha"));
+
+    // 原样导回：id 冲突 → 重新分配，名字加 (导入)，依赖改写到新 id
+    let (imported, skipped) = import_text(&state, &text).unwrap();
+    assert_eq!(imported, 2, "两个都能导入：{skipped:?}");
+    assert!(skipped.is_empty());
+
+    let data = state.data.lock().unwrap();
+    assert_eq!(data.components.len(), 4);
+
+    let imported_beta = data
+        .components
+        .iter()
+        .find(|c| c.name == "beta (导入)")
+        .expect("重名应加后缀");
+    let imported_alpha = data
+        .components
+        .iter()
+        .find(|c| c.name == "alpha (导入)")
+        .expect("重名应加后缀");
+    assert_ne!(imported_alpha.id, "alpha", "id 冲突必须重新分配");
+    assert_eq!(
+        imported_beta.depends_on,
+        vec![imported_alpha.id.clone()],
+        "依赖应改写到新 id"
+    );
+}
+
+/// 坏数据要能跳过而不是整份失败
+#[test]
+fn import_skips_bad_entries() {
+    use commandkit_lib::state::load_state;
+    use commandkit_lib::transfer::import_text;
+
+    let root = std::env::temp_dir().join(format!("ck-transfer-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let state = std::sync::Arc::new(load_state(root.clone(), None));
+
+    let text = r#"{"components":[
+        {"id":"ok-1","name":"好的","projectId":"all","workdir":"/tmp","commands":[{"cmd":"echo hi","join":"and"}]},
+        {"id":"bad-1","name":"没有命令","projectId":"all","workdir":"/tmp","commands":[]},
+        {"name":123}
+    ]}"#;
+    let (imported, skipped) = import_text(&state, text).unwrap();
+    assert_eq!(imported, 1, "只有一条合法");
+    assert_eq!(skipped.len(), 2, "其余应被跳过：{skipped:?}");
+}
+
 #[test]
 fn categories_are_serializable() {
     // 守住 IPC 契约：Category 走 camelCase，前端 types.ts 依赖这一点

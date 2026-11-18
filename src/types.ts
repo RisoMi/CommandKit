@@ -87,6 +87,7 @@ export interface SessionView {
   status: Status;
   pid: number | null;
   startedAt: number | null;
+  endedAt: number | null;
   exitCode: number | null;
   error: string | null;
   restarts: number;
@@ -152,6 +153,12 @@ export interface AppInfo {
   webview: string;
 }
 
+export interface ImportResult {
+  imported: number;
+  skipped: string[];
+  snapshot: Snapshot;
+}
+
 export interface Snapshot {
   info: AppInfo;
   projects: Project[];
@@ -173,4 +180,4 @@ export interface TermChunk extends LogChunk {
   id: string;
 }
 
-export type ViewKey = 'workbench' | 'bulk' | 'templates' | 'monitor' | 'settings';
+export type ViewKey = 'workbench' | 'bulk' | 'monitor' | 'settings';

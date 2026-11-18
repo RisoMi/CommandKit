@@ -1,6 +1,7 @@
 import { invoke } from './bridge';
 import type {
   Component,
+  ImportResult,
   LogChunk,
   ProcessDetail,
   Project,
@@ -19,6 +20,10 @@ export const api = {
   // 组件（可启动单元）
   saveComponent: (component: Component) => invoke<Snapshot>('save_component', { component }),
   deleteComponent: (id: string) => invoke<Snapshot>('delete_component', { id }),
+
+  exportComponents: (ids: string[], path: string) =>
+    invoke<string>('export_components', { ids, path }),
+  importComponents: (path: string) => invoke<ImportResult>('import_components', { path }),
 
   saveTemplate: (template: Template) => invoke<Snapshot>('save_template', { template }),
   deleteTemplate: (id: string) => invoke<Snapshot>('delete_template', { id }),

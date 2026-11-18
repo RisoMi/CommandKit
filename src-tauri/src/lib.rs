@@ -3,6 +3,7 @@ mod metrics;
 pub mod model;
 pub mod proc;
 pub mod state;
+pub mod transfer;
 pub mod store;
 pub mod supervisor;
 
@@ -102,6 +103,8 @@ pub fn run() {
             commands::delete_project,
             commands::save_component,
             commands::delete_component,
+            commands::export_components,
+            commands::import_components,
             commands::save_template,
             commands::delete_template,
             commands::save_settings,

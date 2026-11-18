@@ -256,6 +256,35 @@ pub fn delete_project(state: St<'_>, id: String) -> Result<Snapshot, String> {
     Ok(snapshot_of(state.inner()))
 }
 
+// ---------------------------------------------------------------- 组件配置导入导出
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    imported: usize,
+    skipped: Vec<String>,
+    snapshot: Snapshot,
+}
+
+/// 把选中的组件导出成 JSON 文件（ids 为空则导出全部）
+#[tauri::command]
+pub fn export_components(state: St<'_>, ids: Vec<String>, path: String) -> Result<String, String> {
+    let target = expand_home(&path);
+    crate::transfer::export_to(state.inner(), &ids, &target)?;
+    Ok(target)
+}
+
+/// 从 JSON 文件导入组件
+#[tauri::command]
+pub fn import_components(state: St<'_>, path: String) -> Result<ImportResult, String> {
+    let (imported, skipped) = crate::transfer::import_from(state.inner(), &expand_home(&path))?;
+    Ok(ImportResult {
+        imported,
+        skipped,
+        snapshot: snapshot_of(state.inner()),
+    })
+}
+
 // ---------------------------------------------------------------- 模板 / 设置
 
 #[tauri::command]

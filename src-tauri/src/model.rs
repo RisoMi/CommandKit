@@ -278,6 +278,8 @@ pub struct SessionView {
     pub status: Status,
     pub pid: Option<u32>,
     pub started_at: Option<u64>,
+    /// 结束时刻（停止 / 崩溃 / 正常退出），用于冻结运行时长
+    pub ended_at: Option<u64>,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
     pub restarts: u32,

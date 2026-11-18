@@ -75,6 +75,7 @@ pub struct Session {
 }
 
 pub struct Inner {
+    pub ended_at: Option<u64>,
     pub status: Status,
     pub pid: Option<u32>,
     pub started_at: Option<u64>,
@@ -99,6 +100,7 @@ impl Inner {
             status: Status::Stopped,
             pid: None,
             started_at: None,
+            ended_at: None,
             started_instant: None,
             exit_code: None,
             error: None,
@@ -135,6 +137,7 @@ impl Session {
             status: inner.status,
             pid: inner.pid,
             started_at: inner.started_at,
+            ended_at: inner.ended_at,
             exit_code: inner.exit_code,
             error: inner.error.clone(),
             restarts: inner.restarts,
@@ -571,6 +574,7 @@ pub async fn start(
         inner.health_ok = false;
         inner.pid = None;
         inner.started_at = Some(store::now_ms());
+        inner.ended_at = None;
         inner.started_instant = Some(Instant::now());
         inner.log_file = open_log_file(&state.root, &spec, persist);
     }
@@ -947,6 +951,8 @@ async fn finish(
         inner.health_ok = false;
         inner.log_file = None;
         inner.started_instant = None;
+        // 冻结运行时长：结束后不再随时钟增长
+        inner.ended_at = Some(store::now_ms());
         match status {
             Ok(st) => {
                 let code = st.code();
@@ -1332,7 +1338,16 @@ pub async fn stop_many(
 ) -> Result<(), String> {
     let mut order = {
         let data = state.data.lock().unwrap();
-        topo_order(&data.components, &ids).unwrap_or_else(|_| ids.clone())
+        {
+            // 模板会话（tpl:*）不在组件表里，拓扑排序会丢掉它们 —— 这里补回原顺序
+            let mut order = topo_order(&data.components, &ids).unwrap_or_else(|_| ids.clone());
+            for id in &ids {
+                if !order.contains(id) {
+                    order.push(id.clone());
+                }
+            }
+            order
+        }
     };
     order.reverse(); // 停止按依赖逆序
 

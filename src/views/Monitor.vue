@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
 import { copyText } from '../clipboard';
-import { fmtCpu, fmtMem, fmtUptime, statusText } from '../format';
+import { fmtCpu, fmtMem, statusText, uptimeOf } from '../format';
 import { askConfirm, batchIds, componentById, openBulk, projectName, state, toast } from '../store';
 import type { ProcessDetail, ProcNode, SessionView } from '../types';
 
@@ -135,10 +135,17 @@ async function exportSnapshot() {
 }
 
 async function stopAll() {
-  const ids = batchIds.value;
+  // 包含模板会话：它们不在组件表里，但同样是活着的进程
+  const ids = Object.values(state.sessions)
+    .filter((s) => ['running', 'starting', 'restarting'].includes(s.status))
+    .map((s) => s.id);
+  if (!ids.length) {
+    toast('warn', '当前没有运行中的会话');
+    return;
+  }
   const ok = await askConfirm({
     title: '停止全部',
-    message: `将按依赖逆序终止 ${ids.length} 个项目的整棵进程树。`,
+    message: `将按依赖逆序终止 ${ids.length} 个会话的整棵进程树。`,
     okText: '确认停止',
     danger: true,
   });
@@ -181,8 +188,8 @@ function dotOf(s: SessionView): string {
     <table class="p">
       <thead>
         <tr>
+          <th>组件</th>
           <th>项目</th>
-          <th>分类</th>
           <th>PID</th>
           <th>端口</th>
           <th>CPU</th>
@@ -209,7 +216,7 @@ function dotOf(s: SessionView): string {
           <td class="mono">{{ s.ports.length ? s.ports.map((p) => `:${p}`).join(' ') : '—' }}</td>
           <td class="mono">{{ metric(s.id) ? fmtCpu(metric(s.id)!.cpu) : '—' }}</td>
           <td class="mono">{{ metric(s.id) && metric(s.id)!.mem ? fmtMem(metric(s.id)!.mem) : '—' }}</td>
-          <td class="mono">{{ fmtUptime(s.startedAt, state.now) }}</td>
+          <td class="mono">{{ uptimeOf(s, state.now) }}</td>
           <td>
             <span class="pill" :class="s.status">{{ statusText(s.status) }}</span>
           </td>
