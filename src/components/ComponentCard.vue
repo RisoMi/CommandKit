@@ -53,9 +53,9 @@ async function openFolder() {
       <span class="pname" :title="component.name">{{ component.name }}</span>
       <span v-if="showProject" class="tag projtag">{{ projectName(component.projectId) }}</span>
       <span v-if="component.stack" class="tag">{{ component.stack }}</span>
-      <span class="spacer"></span>
-      <button class="iconbtn" title="打开工作目录" @click.stop="openFolder">
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <div class="cardactions">
+        <button class="iconbtn" title="打开工作目录" @click.stop="openFolder">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
           <path
             d="M1.5 4.2c0-.6.5-1.1 1.1-1.1h3l1.3 1.5h6.5c.6 0 1.1.5 1.1 1.1v6.6c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"
             fill="none"
@@ -65,18 +65,19 @@ async function openFolder() {
           />
         </svg>
       </button>
-      <button class="iconbtn danger" title="删除组件" @click.stop="deleteComponentById(component.id)">
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-          <path
-            d="M3 4.5h10M6.5 4.5V3.2c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7v1.3M4.3 4.5l.6 8.1c0 .5.4.9.9.9h4.4c.5 0 .9-.4.9-.9l.6-8.1"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+        <button class="iconbtn danger" title="删除组件" @click.stop="deleteComponentById(component.id)">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path
+              d="M3 4.5h10M6.5 4.5V3.2c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7v1.3M4.3 4.5l.6 8.1c0 .5.4.9.9.9h4.4c.5 0 .9-.4.9-.9l.6-8.1"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <div class="pmeta" :title="meta" @click="openFolder">{{ meta }}</div>
@@ -119,6 +120,21 @@ async function openFolder() {
   gap: 7px;
   min-width: 0;
 }
+.pname {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 卡片里的标签紧跟名称，不要被 .tag 的 margin-left:auto 推到最右 */
+.tag {
+  margin-left: 0;
+}
+.cardactions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: 6px;
+}
 .pcheck {
   display: flex;
   align-items: center;
@@ -128,20 +144,17 @@ async function openFolder() {
 .projtag {
   color: var(--t4);
 }
-.spacer {
-  flex: 1;
-}
 .iconbtn {
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 5px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--t4);
+  color: var(--t3);
   cursor: pointer;
   transition: color 0.12s, background 0.12s, border-color 0.12s;
 }

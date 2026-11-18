@@ -629,20 +629,21 @@ textarea,
   cursor: not-allowed;
 }
 .pcheck {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+  /* 曾经是绝对定位在右上角，会和卡片右上角的操作按钮重叠 —— 改为行内 */
+  display: flex;
+  align-items: center;
+  flex: none;
+  cursor: pointer;
   opacity: 0;
+  transition: opacity 0.12s;
 }
 .pcheck input {
   accent-color: #9eff00;
+  cursor: pointer;
 }
 .proj:hover .pcheck,
 .proj.selected .pcheck {
   opacity: 1;
-}
-.pcheck input {
-  cursor: pointer;
 }
 
 /* ---------------------------------------------------------------- 表单 */
