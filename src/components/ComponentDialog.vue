@@ -201,16 +201,16 @@ function drop() {
           </div>
           <input v-model="step.cmd" :placeholder="i === 0 ? 'npm ci' : 'npm run dev'" />
           <button class="iconbtn" title="在下方插入一条" @click="addStep(i)">
-            <svg viewBox="0 0 16 16" width="12" height="12"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
           </button>
           <button class="iconbtn" title="上移" :disabled="i === 0" @click="moveStep(i, -1)">
-            <svg viewBox="0 0 16 16" width="12" height="12"><path d="M8 12.5v-9M4.5 7L8 3.5 11.5 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 12.5v-9M4.5 7L8 3.5 11.5 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
           </button>
           <button class="iconbtn" title="下移" :disabled="i === steps.length - 1" @click="moveStep(i, 1)">
-            <svg viewBox="0 0 16 16" width="12" height="12"><path d="M8 3.5v9M4.5 9L8 12.5 11.5 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3.5v9M4.5 9L8 12.5 11.5 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
           </button>
           <button class="iconbtn danger" title="删除这一步" @click="removeStep(i)">
-            <svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
           </button>
         </div>
         <div class="row" style="align-items: center">
@@ -347,8 +347,8 @@ function drop() {
 .steprow {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 /* 全局 input 是 width:100%，在 flex 行里会把右侧按钮挤出弹窗 */
 .steprow input {
@@ -357,13 +357,13 @@ function drop() {
   min-width: 0;
 }
 .joinbox {
-  flex: 0 0 46px;
+  flex: 0 0 50px;
   display: flex;
   justify-content: center;
 }
 .joinselect {
-  width: 44px;
-  padding: 5px 4px 5px 6px;
+  width: 48px;
+  padding: 7px 4px 7px 8px;
   text-align: center;
   background-position: right 4px center;
 }
@@ -373,21 +373,22 @@ function drop() {
 }
 .iconbtn {
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--t4);
+  border-radius: 6px;
+  border: 1px solid var(--stroke);
+  background: #17191b;
+  color: var(--t2);
   cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
 .iconbtn:hover:not(:disabled) {
   color: var(--t1);
-  background: #1e2124;
-  border-color: var(--stroke);
+  background: #22262a;
+  border-color: #3a3e42;
 }
 .iconbtn:disabled {
   opacity: 0.35;

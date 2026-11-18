@@ -6,7 +6,11 @@ import { state } from '../store';
 
 // 浏览器演示模式下没有窗口元数据，退化为无操作的标题栏
 const win = inTauri ? getCurrentWindow() : null;
-const isMac = computed(() => state.info?.platform === 'macos');
+// 首帧 info 还没回来时要先按 UA 判断，否则会闪一下 Windows 控件、标题也会压到红绿灯上
+const uaIsMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+const isMac = computed(() =>
+  state.info ? state.info.platform === 'macos' : uaIsMac
+);
 
 const TITLES: Record<string, string> = {
   workbench: '项目工作台',
