@@ -5,13 +5,14 @@ import ComponentDialog from './components/ComponentDialog.vue';
 import SideNav from './components/SideNav.vue';
 import TitleBar from './components/TitleBar.vue';
 import BulkRun from './views/BulkRun.vue';
+import Environments from './views/Environments.vue';
 import Monitor from './views/Monitor.vue';
 import SettingsView from './views/SettingsView.vue';
 import Workbench from './views/Workbench.vue';
 import { bootstrapApp, closeEditor, confirmState, editor, resolveConfirm, state } from './store';
 import type { ViewKey } from './types';
 
-const ORDER: ViewKey[] = ['workbench', 'bulk', 'monitor', 'settings'];
+const ORDER: ViewKey[] = ['workbench', 'bulk', 'environments', 'monitor', 'settings'];
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
@@ -26,7 +27,7 @@ function onKey(e: KeyboardEvent) {
     }
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && /^[1-4]$/.test(e.key)) {
+  if ((e.metaKey || e.ctrlKey) && /^[1-5]$/.test(e.key)) {
     const idx = Number(e.key) - 1;
     if (ORDER[idx]) {
       state.view = ORDER[idx];
@@ -56,6 +57,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         <template v-else>
           <Workbench v-if="state.view === 'workbench'" />
           <BulkRun v-else-if="state.view === 'bulk'" />
+          <Environments v-else-if="state.view === 'environments'" />
           <Monitor v-else-if="state.view === 'monitor'" />
           <SettingsView v-else />
         </template>

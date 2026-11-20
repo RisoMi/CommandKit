@@ -101,6 +101,8 @@ pub fn run() {
             commands::bootstrap,
             commands::save_project,
             commands::delete_project,
+            commands::save_environment,
+            commands::delete_environment,
             commands::save_component,
             commands::delete_component,
             commands::export_components,

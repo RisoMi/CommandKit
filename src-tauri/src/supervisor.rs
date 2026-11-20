@@ -186,7 +186,23 @@ pub fn display_chain(steps: &[CommandStep]) -> String {
         .join("")
 }
 
-pub fn spec_from_component(c: &Component) -> SpawnSpec {
+/// 合并环境：环境提供基础变量，组件自身的 env 覆盖同名项
+pub fn merged_env(c: &Component, envs: &[Environment]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    if let Some(id) = c.env_profile.as_deref() {
+        if let Some(profile) = envs.iter().find(|e| e.id == id) {
+            for (k, v) in &profile.env {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    for (k, v) in &c.env {
+        out.insert(k.clone(), v.clone());
+    }
+    out
+}
+
+pub fn spec_from_component(c: &Component, envs: &[Environment]) -> SpawnSpec {
     SpawnSpec {
         id: c.id.clone(),
         name: c.name.clone(),
@@ -195,7 +211,7 @@ pub fn spec_from_component(c: &Component) -> SpawnSpec {
         command: display_chain(&c.commands),
         steps: c.commands.clone(),
         workdir: c.workdir.clone(),
-        env: c.env.clone(),
+        env: merged_env(c, envs),
         ports: c.ports.clone(),
         health: c.health.clone(),
         policy: c.policy.clone(),
@@ -1104,7 +1120,7 @@ pub async fn restart(
         data.components
             .iter()
             .find(|c| c.id == id)
-            .map(spec_from_component)
+            .map(|c| spec_from_component(c, &data.environments))
     };
     let spec = match spec {
         Some(s) => s,
@@ -1244,7 +1260,7 @@ pub async fn start_many(
             .components
             .iter()
             .filter(|c| ids.iter().any(|i| i == &c.id))
-            .map(|c| (c.id.clone(), spec_from_component(c)))
+            .map(|c| (c.id.clone(), spec_from_component(c, &data.environments)))
             .collect();
         (order, specs)
     };

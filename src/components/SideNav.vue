@@ -15,6 +15,7 @@ import type { Project, ViewKey } from '../types';
 const NAV: { key: ViewKey; label: string }[] = [
   { key: 'workbench', label: '项目工作台' },
   { key: 'bulk', label: '终端' },
+  { key: 'environments', label: '环境' },
   { key: 'monitor', label: '进程监管' },
   { key: 'settings', label: '设置' },
 ];
@@ -157,6 +158,18 @@ async function removeProject(p: Project) {
       <div v-if="!groups.length" class="sidefoot">还没有会话，从工作台点「一键运行」或单个「运行」。</div>
     </template>
 
+    <!-- 环境 -->
+    <template v-else-if="state.view === 'environments'">
+      <div class="sidehead">
+        <span>环境</span><span>{{ state.environments.length }}</span>
+      </div>
+      <div v-for="e in state.environments" :key="e.id" class="side-session">
+        <i class="cdot" :style="{ background: e.color ?? '#62686d' }"></i>
+        <span class="nm">{{ e.name }}</span>
+      </div>
+      <div class="sidefoot">在「编辑组件 → 环境」里引用</div>
+    </template>
+
     <!-- 进程监管 -->
     <template v-else-if="state.view === 'monitor'">
       <div class="sidehead"><span>视图</span><span>刷新 2s</span></div>
@@ -249,7 +262,13 @@ async function removeProject(p: Project) {
   flex: 1;
   min-width: 0;
 }
-.catrow .cnt {
+.catrow .cdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.cnt {
   color: var(--t4);
   font-size: 10.5px;
   white-space: nowrap;
@@ -265,6 +284,12 @@ async function removeProject(p: Project) {
 }
 .mgmt:hover {
   color: var(--t2);
+}
+.cdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
 }
 .cnt {
   color: var(--t4);

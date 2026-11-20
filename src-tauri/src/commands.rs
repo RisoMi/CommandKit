@@ -27,6 +27,7 @@ pub struct Snapshot {
     projects: Vec<Project>,
     /// 组件（可启动单元）
     components: Vec<Component>,
+    environments: Vec<Environment>,
     templates: Vec<Template>,
     settings: Settings,
     sessions: Vec<SessionView>,
@@ -35,11 +36,12 @@ pub struct Snapshot {
 }
 
 fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
-    let (projects, components, templates, settings) = {
+    let (projects, components, environments, templates, settings) = {
         let data = state.data.lock().unwrap();
         (
             data.projects.clone(),
             data.components.clone(),
+            data.environments.clone(),
             data.templates.clone(),
             data.settings.clone(),
         )
@@ -67,6 +69,7 @@ fn snapshot_of(state: &Arc<AppState>) -> Snapshot {
         info,
         projects,
         components,
+        environments,
         templates,
         settings,
         sessions,
@@ -256,6 +259,53 @@ pub fn delete_project(state: St<'_>, id: String) -> Result<Snapshot, String> {
     Ok(snapshot_of(state.inner()))
 }
 
+// ---------------------------------------------------------------- 环境
+
+#[tauri::command]
+pub fn save_environment(state: St<'_>, mut environment: Environment) -> Result<Snapshot, String> {
+    {
+        let mut data = state.data.lock().unwrap();
+        environment.name = environment.name.trim().to_string();
+        if environment.name.is_empty() {
+            return Err("环境名称不能为空".into());
+        }
+        if environment.id.trim().is_empty() {
+            environment.id = gen_id("env");
+        }
+        environment.env.retain(|k, _| !k.trim().is_empty());
+        if environment.env.is_empty() {
+            return Err("至少需要一个环境变量".into());
+        }
+        match data.environments.iter_mut().find(|e| e.id == environment.id) {
+            Some(existing) => *existing = environment,
+            None => data.environments.push(environment),
+        }
+        data.environments.sort_by_key(|e| e.name.clone());
+        data.save_environments()
+            .map_err(|e| format!("保存 environments.json 失败：{e}"))?;
+    }
+    Ok(snapshot_of(state.inner()))
+}
+
+#[tauri::command]
+pub fn delete_environment(state: St<'_>, id: String) -> Result<Snapshot, String> {
+    {
+        let mut data = state.data.lock().unwrap();
+        data.environments.retain(|e| e.id != id);
+        // 引用它的组件回落到「不引用环境」，组件自身的覆盖仍然保留
+        for c in data.components.iter_mut() {
+            if c.env_profile.as_deref() == Some(id.as_str()) {
+                c.env_profile = None;
+            }
+        }
+        data.save_environments()
+            .map_err(|e| format!("保存 environments.json 失败：{e}"))?;
+        data.save_projects()
+            .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
+    }
+    Ok(snapshot_of(state.inner()))
+}
+
 // ---------------------------------------------------------------- 组件配置导入导出
 
 #[derive(Serialize)]
@@ -352,7 +402,7 @@ fn spec_for(state: &Arc<AppState>, id: &str) -> Result<SpawnSpec, String> {
     data.components
         .iter()
         .find(|c| c.id == id)
-        .map(supervisor::spec_from_component)
+        .map(|c| supervisor::spec_from_component(c, &data.environments))
         .ok_or_else(|| format!("未知组件：{id}"))
 }
 

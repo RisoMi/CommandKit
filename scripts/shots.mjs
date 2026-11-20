@@ -111,6 +111,13 @@ await page.getByText('进程监管', { exact: true }).first().click();
 await page.waitForTimeout(900);
 await page.screenshot({ path: join(OUT, '04-monitor.png') });
 
+// 环境
+await page.getByText('环境', { exact: true }).first().click();
+await page.waitForTimeout(500);
+const envCards = await page.locator('.envcard').count();
+if (envCards < 3) throw new Error(`环境页应有内置环境，实际 ${envCards} 个`);
+await page.screenshot({ path: join(OUT, '04c-environments.png') });
+
 // 从模板新建（原「模板库」已并入项目工作台）
 await page.getByText('项目工作台', { exact: true }).first().click();
 await page.waitForTimeout(400);

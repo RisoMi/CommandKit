@@ -28,6 +28,15 @@ export interface CommandStep {
   join: Join;
 }
 
+/** 环境：一组可复用的环境变量 */
+export interface Environment {
+  id: string;
+  name: string;
+  desc: string;
+  color: string | null;
+  env: Record<string, string>;
+}
+
 /** 项目：组件的分组容器 */
 export interface Project {
   id: string;
@@ -43,6 +52,8 @@ export interface Component {
   projectId: string;
   stack: string;
   workdir: string;
+  /** 引用的环境 id；环境提供基础变量，env 作为覆盖 */
+  envProfile: string | null;
   commands: CommandStep[];
   env: Record<string, string>;
   ports: number[];
@@ -163,6 +174,7 @@ export interface Snapshot {
   info: AppInfo;
   projects: Project[];
   components: Component[];
+  environments: Environment[];
   templates: Template[];
   settings: Settings;
   sessions: SessionView[];
@@ -180,4 +192,4 @@ export interface TermChunk extends LogChunk {
   id: string;
 }
 
-export type ViewKey = 'workbench' | 'bulk' | 'monitor' | 'settings';
+export type ViewKey = 'workbench' | 'bulk' | 'environments' | 'monitor' | 'settings';

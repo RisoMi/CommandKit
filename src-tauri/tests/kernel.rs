@@ -15,6 +15,7 @@ fn project(id: &str, deps: &[&str]) -> Component {
         project_id: "all".into(),
         stack: String::new(),
         workdir: std::env::temp_dir().display().to_string(),
+        env_profile: None,
         commands: vec![CommandStep::new("echo ok", Join::And)],
         env: Default::default(),
         ports: vec![],
@@ -269,6 +270,99 @@ fn export_then_import_roundtrip() {
         vec![imported_alpha.id.clone()],
         "依赖应改写到新 id"
     );
+}
+
+/// 环境合并：环境打底，组件自身同名变量覆盖
+#[test]
+fn env_profile_is_merged_with_component_overrides() {
+    use commandkit_lib::model::Environment;
+    use commandkit_lib::supervisor::{merged_env, spec_from_component};
+
+    let mut base = BTreeMap::new();
+    base.insert("JAVA_HOME".to_string(), "/opt/jdk17".to_string());
+    base.insert("PATH".to_string(), "$JAVA_HOME/bin:$PATH".to_string());
+    let envs = vec![Environment {
+        id: "env-java".into(),
+        name: "Java 17".into(),
+        desc: String::new(),
+        color: None,
+        env: base,
+    }];
+
+    let mut c = project("app", &[]);
+    c.env_profile = Some("env-java".into());
+    c.env.insert("JAVA_OPTS".into(), "-Xmx2g".into());
+    c.env.insert("PATH".into(), "/custom/bin:$PATH".into());
+
+    let merged = merged_env(&c, &envs);
+    assert_eq!(merged.get("JAVA_HOME").unwrap(), "/opt/jdk17", "环境变量应注入");
+    assert_eq!(merged.get("JAVA_OPTS").unwrap(), "-Xmx2g", "组件自己的变量保留");
+    assert_eq!(
+        merged.get("PATH").unwrap(),
+        "/custom/bin:$PATH",
+        "同名时组件覆盖环境"
+    );
+
+    // 没有引用环境时只保留组件自身变量
+    let mut plain = project("plain", &[]);
+    plain.env.insert("A".into(), "1".into());
+    assert_eq!(merged_env(&plain, &envs).len(), 1);
+
+    // spec 走的是合并后的 env
+    let spec = spec_from_component(&c, &envs);
+    assert_eq!(spec.env.get("JAVA_HOME").unwrap(), "/opt/jdk17");
+}
+
+/// 导出会带上被引用的环境，导入后组件仍指向可用的环境
+#[test]
+fn export_carries_referenced_environments() {
+    use commandkit_lib::state::load_state;
+    use commandkit_lib::transfer::{export_to, import_text};
+
+    let root = std::env::temp_dir().join(format!("ck-env-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let state = std::sync::Arc::new(load_state(root.clone(), None));
+
+    let env_id = {
+        let mut data = state.data.lock().unwrap();
+        data.components.clear();
+        let mut c = project("with-env", &[]);
+        c.name = "with-env".into();
+        c.env_profile = Some(data.environments[0].id.clone());
+        let id = data.environments[0].id.clone();
+        data.components.push(c);
+        id
+    };
+
+    let file = root.join("env.json");
+    export_to(&state, &[], file.to_str().unwrap()).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"environments\""), "导出文件应包含 environments");
+
+    // 导入到干净状态：环境应被创建，组件引用可用
+    let root2 = std::env::temp_dir().join(format!("ck-env-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root2);
+    std::fs::create_dir_all(&root2).unwrap();
+    let fresh = std::sync::Arc::new(load_state(root2.clone(), None));
+    {
+        let mut data = fresh.data.lock().unwrap();
+        data.components.clear();
+        data.environments.clear();
+    }
+
+    let (imported, _) = import_text(&fresh, &text).unwrap();
+    assert_eq!(imported, 1);
+
+    let data = fresh.data.lock().unwrap();
+    assert!(!data.environments.is_empty(), "环境应随文件导入");
+    let c = &data.components[0];
+    let profile = c.env_profile.clone().expect("组件应仍引用环境");
+    assert!(
+        data.environments.iter().any(|e| e.id == profile),
+        "引用的环境必须存在：{profile}"
+    );
+    let _ = env_id;
 }
 
 /// 坏数据要能跳过而不是整份失败

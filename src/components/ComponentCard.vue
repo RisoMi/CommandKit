@@ -4,6 +4,7 @@ import { api } from '../api';
 import { fmtCpu, portText, statusText, uptimeOf } from '../format';
 import {
   deleteComponentById,
+  environmentById,
   openBulk,
   openEditor,
   projectName,
@@ -32,6 +33,7 @@ const meta = computed(() => {
   return port ? `${props.component.workdir} · ${port}` : props.component.workdir;
 });
 const stepCount = computed(() => props.component.commands.filter((s) => s.cmd.trim()).length);
+const envName = computed(() => environmentById(props.component.envProfile)?.name ?? '');
 
 const isActive = computed(() =>
   ['running', 'starting', 'restarting', 'stopping'].includes(status.value)
@@ -56,6 +58,7 @@ async function openFolder() {
       <i class="dot" :class="status"></i>
       <span class="pname" :title="component.name">{{ component.name }}</span>
       <span v-if="showProject" class="tag projtag">{{ projectName(component.projectId) }}</span>
+      <span v-if="envName" class="tag envtag" :title="`环境：${envName}`">{{ envName }}</span>
       <span v-if="component.stack" class="tag">{{ component.stack }}</span>
       <div class="cardactions">
         <button class="iconbtn" title="打开工作目录" @click.stop="openFolder">
@@ -147,6 +150,10 @@ async function openFolder() {
 }
 .projtag {
   color: var(--t4);
+}
+.envtag {
+  color: #8fbf6a;
+  border-color: #2f4225;
 }
 .iconbtn {
   flex: none;

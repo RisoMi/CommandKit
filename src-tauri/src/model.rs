@@ -60,6 +60,9 @@ pub struct Component {
     /// 启动命令链：按顺序执行，步骤之间用「且 / 或」连接
     #[serde(default)]
     pub commands: Vec<CommandStep>,
+    /// 引用的环境 id（环境提供基础变量，下面的 env 作为覆盖）
+    #[serde(default)]
+    pub env_profile: Option<String>,
     /// 仅注入到本组件的子进程，不写系统环境变量
     #[serde(default)]
     pub env: BTreeMap<String, String>,
@@ -146,6 +149,20 @@ impl Default for Policy {
             max_restarts: default_max_restarts(),
         }
     }
+}
+
+/// 环境：一组可复用的环境变量，组件通过 envProfile 引用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Environment {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub desc: String,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// 项目：组件的分组容器（旧版本里叫「分类」）

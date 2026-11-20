@@ -1,6 +1,7 @@
 import { invoke } from './bridge';
 import type {
   Component,
+  Environment,
   ImportResult,
   LogChunk,
   ProcessDetail,
@@ -24,6 +25,9 @@ export const api = {
   exportComponents: (ids: string[], path: string) =>
     invoke<string>('export_components', { ids, path }),
   importComponents: (path: string) => invoke<ImportResult>('import_components', { path }),
+
+  saveEnvironment: (environment: Environment) => invoke<Snapshot>('save_environment', { environment }),
+  deleteEnvironment: (id: string) => invoke<Snapshot>('delete_environment', { id }),
 
   saveTemplate: (template: Template) => invoke<Snapshot>('save_template', { template }),
   deleteTemplate: (id: string) => invoke<Snapshot>('delete_template', { id }),

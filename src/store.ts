@@ -5,6 +5,7 @@ import { normalizeCr, parseAnsi, stripAnsi, type Seg } from './ansi';
 import type {
   AppInfo,
   BulkView,
+  Environment,
   Project,
   LogChunk,
   MetricRow,
@@ -42,6 +43,7 @@ export const state = reactive({
   info: null as AppInfo | null,
   projects: [] as Project[],
   components: [] as Component[],
+  environments: [] as Environment[],
   templates: [] as Template[],
   settings: null as Settings | null,
   sessions: {} as Record<string, SessionView>,
@@ -210,6 +212,7 @@ function applySnapshot(snap: Snapshot) {
   state.info = snap.info;
   state.projects = snap.projects;
   state.components = snap.components;
+  state.environments = snap.environments;
   state.templates = snap.templates;
   state.settings = snap.settings;
   state.metrics = snap.metrics;
@@ -284,6 +287,26 @@ export function statusOf(id: string): Status {
 
 export function metricOf(id: string): MetricRow {
   return state.metrics[id] ?? { id, pid: null, cpu: 0, mem: 0, children: 0 };
+}
+
+/** 环境实体 */
+export function environmentById(id: string | null | undefined): Environment | undefined {
+  if (!id) return undefined;
+  return state.environments.find((e) => e.id === id);
+}
+
+/** 引用了某个环境的组件数 */
+export function environmentUsage(id: string): number {
+  return state.components.filter((c) => c.envProfile === id).length;
+}
+
+/** 组件最终生效的环境变量：环境打底 + 自身覆盖 */
+export function resolvedEnv(c: Component): Record<string, string> {
+  const out: Record<string, string> = {};
+  const profile = environmentById(c.envProfile);
+  if (profile) Object.assign(out, profile.env);
+  Object.assign(out, c.env ?? {});
+  return out;
 }
 
 export function projectName(id: string): string {
@@ -472,6 +495,7 @@ export function newComponent(): Component {
     projectId: pid,
     stack: '',
     workdir: '',
+    envProfile: null,
     commands: [],
     env: {},
     ports: [],

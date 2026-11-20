@@ -11,6 +11,7 @@ use crate::supervisor::Session;
 
 pub struct DataStore {
     pub projects_file: JsonFile,
+    pub environments_file: JsonFile,
     pub templates_file: JsonFile,
     pub settings_file: JsonFile,
     pub snapshot_file: JsonFile,
@@ -18,6 +19,7 @@ pub struct DataStore {
     pub projects: Vec<Project>,
     /// 组件（可启动单元）
     pub components: Vec<Component>,
+    pub environments: Vec<Environment>,
     pub templates: Vec<Template>,
     pub settings: Settings,
 }
@@ -36,6 +38,9 @@ impl DataStore {
             projects: &self.projects,
             components: &self.components,
         })
+    }
+    pub fn save_environments(&self) -> std::io::Result<()> {
+        self.environments_file.write(&self.environments)
     }
     pub fn save_templates(&self) -> std::io::Result<()> {
         self.templates_file.write(&self.templates)
@@ -112,6 +117,7 @@ impl LegacyComponent {
             },
             stack: self.stack,
             workdir: self.workdir,
+            env_profile: None,
             commands: if self.command.trim().is_empty() {
                 Vec::new()
             } else {
@@ -149,6 +155,7 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
     let _ = std::fs::create_dir_all(root.join("backup"));
 
     let projects_file = JsonFile::new(&root, "projects.json");
+    let environments_file = JsonFile::new(&root, "environments.json");
     let templates_file = JsonFile::new(&root, "templates.json");
     let settings_file = JsonFile::new(&root, "settings.json");
     let snapshot_file = JsonFile::new(&root, "process-snapshot.json");
@@ -166,6 +173,13 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
     }
     let migrated = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(1) < 2 && !components.is_empty();
 
+    let environments: Vec<Environment> = environments_file.read_or();
+    let environments = if environments.is_empty() {
+        seed_environments()
+    } else {
+        environments
+    };
+
     let templates: Vec<Template> = templates_file.read_or();
     let templates = if templates.is_empty() {
         seed_templates()
@@ -175,16 +189,19 @@ pub fn load_state(root: PathBuf, lock: Option<File>) -> AppState {
 
     let store = DataStore {
         projects_file,
+        environments_file,
         templates_file,
         settings_file,
         snapshot_file,
         projects,
         components,
+        environments,
         templates,
         settings,
     };
     if first_run || migrated {
         let _ = store.save_projects();
+        let _ = store.save_environments();
         let _ = store.save_templates();
         let _ = store.save_settings();
     }
@@ -256,6 +273,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             project_id: "frontend".into(),
             stack: if cfg!(windows) { "PowerShell 7" } else { "zsh" }.into(),
             workdir: home_str.clone(),
+            env_profile: None,
             commands: vec![CommandStep::new(
                 if cfg!(windows) {
                     "node -v; npm -v; $PSVersionTable.PSVersion"
@@ -279,6 +297,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             project_id: "backend".into(),
             stack: if cfg!(windows) { "Python" } else { "Python 3" }.into(),
             workdir: home_str.clone(),
+            env_profile: None,
             commands: vec![CommandStep::new(&server_cmd, Join::And)],
             env: Default::default(),
             ports: vec![8899],
@@ -299,6 +318,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             project_id: "middleware".into(),
             stack: "shell".into(),
             workdir: home_str,
+            env_profile: None,
             commands: vec![CommandStep::new(&tick_cmd, Join::And)],
             env: Default::default(),
             ports: vec![],
@@ -308,6 +328,50 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             auto_start: false,
             shell: None,
             note: "示例项目：20 行输出后正常退出，用于观察状态机流转。".into(),
+        },
+    ]
+}
+
+/// 内置几个常见环境，用户可以直接拿来用或改
+fn seed_environments() -> Vec<Environment> {
+    let mut java = std::collections::BTreeMap::new();
+    let mut py = std::collections::BTreeMap::new();
+    let mut node = std::collections::BTreeMap::new();
+    if cfg!(windows) {
+        java.insert("JAVA_HOME".to_string(), "C:\\Program Files\\Java\\jdk-17".to_string());
+        java.insert("PATH".to_string(), "%JAVA_HOME%\\bin;%PATH%".to_string());
+        py.insert("PYTHONUTF8".to_string(), "1".to_string());
+        py.insert("PYTHONIOENCODING".to_string(), "utf-8".to_string());
+        node.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=4096".to_string());
+    } else {
+        java.insert("JAVA_HOME".to_string(), "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home".to_string());
+        java.insert("PATH".to_string(), "$JAVA_HOME/bin:$PATH".to_string());
+        py.insert("PYTHONUTF8".to_string(), "1".to_string());
+        py.insert("PYTHONIOENCODING".to_string(), "utf-8".to_string());
+        node.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=4096".to_string());
+    }
+
+    vec![
+        Environment {
+            id: "env-java17".into(),
+            name: "Java 17".into(),
+            desc: "JDK 17 + JAVA_HOME 注入".into(),
+            color: Some("#E8A33D".into()),
+            env: java,
+        },
+        Environment {
+            id: "env-python".into(),
+            name: "Python UTF-8".into(),
+            desc: "强制 UTF-8 输出，避免中文乱码".into(),
+            color: Some("#5B9DFF".into()),
+            env: py,
+        },
+        Environment {
+            id: "env-node".into(),
+            name: "Node 大内存".into(),
+            desc: "前端构建时放宽堆上限".into(),
+            color: Some("#9EFF00".into()),
+            env: node,
         },
     ]
 }

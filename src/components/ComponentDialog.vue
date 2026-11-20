@@ -58,6 +58,16 @@ const effectiveShell = computed(() => {
 });
 
 const firstCmd = computed(() => steps.value.find((s) => s.cmd.trim())?.cmd ?? '');
+
+// 环境引用：'' 表示不使用
+const envSel = ref<string>(draft.envProfile ?? '');
+const envProfile = computed(() => state.environments.find((e) => e.id === envSel.value));
+const envProfileVars = computed(() => Object.keys(envProfile.value?.env ?? {}));
+const envHint = computed(() =>
+  envProfile.value
+    ? `环境提供 ${envProfileVars.value.length} 个变量（${envProfileVars.value.join(', ')}）；下面填同名变量会覆盖它。`
+    : '可选：把常用变量组放到「环境」页统一维护，这里直接引用。'
+);
 const shellHint = computed(() => shellInvocation(effectiveShell.value, firstCmd.value));
 
 /** 依赖候选：同项目的其它组件优先，其余按项目分组排序 */
@@ -137,6 +147,7 @@ async function submit() {
   if (draft.health && healthKind.value === 'url' && !draft.health.url?.trim()) {
     draft.health = null;
   }
+  draft.envProfile = envSel.value || null;
   draft.shell =
     shellSel.value === ''
       ? null
@@ -243,7 +254,25 @@ function drop() {
           </div>
         </div>
 
-        <div class="section-t">环境变量注入</div>
+        <div class="section-t">环境</div>
+        <div class="row">
+          <div class="field" style="flex: 1">
+            <label>引用环境</label>
+            <select v-model="envSel">
+              <option value="">不使用环境</option>
+              <option v-for="e in state.environments" :key="e.id" :value="e.id">
+                {{ e.name }}（{{ Object.keys(e.env).length }} 个变量）
+              </option>
+            </select>
+            <span class="hint">{{ envHint }}</span>
+          </div>
+        </div>
+
+        <div class="section-t">
+          变量覆盖<span v-if="envProfile" class="muted" style="font-weight: 400; font-size: 10.5px">
+            （只填需要覆盖 {{ envProfile.name }} 的项）</span
+          >
+        </div>
         <div v-for="(row, i) in envRows" :key="i" class="row" style="margin-bottom: 6px">
           <input v-model="row.k" style="flex: 0 0 200px" placeholder="KEY" />
           <input v-model="row.v" placeholder="VALUE（支持 %PATH% / $PATH 引用现有环境）" />

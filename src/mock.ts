@@ -9,6 +9,7 @@ import type {
   BulkView,
   CommandStep,
   Component,
+  Environment,
   LogChunk,
   MetricRow,
   ProcessDetail,
@@ -60,6 +61,7 @@ function mkComponent(p: Partial<Component> & { id: string; name: string }): Comp
     projectId: 'all',
     stack: '',
     workdir: '',
+    envProfile: null,
     commands: [],
     env: {},
     ports: [],
@@ -72,6 +74,33 @@ function mkComponent(p: Partial<Component> & { id: string; name: string }): Comp
     ...p,
   };
 }
+
+const environments: Environment[] = [
+  {
+    id: 'env-java17',
+    name: 'Java 17',
+    desc: 'JDK 17 + JAVA_HOME 注入',
+    color: '#E8A33D',
+    env: {
+      JAVA_HOME: '/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home',
+      PATH: '$JAVA_HOME/bin:$PATH',
+    },
+  },
+  {
+    id: 'env-python',
+    name: 'Python UTF-8',
+    desc: '强制 UTF-8 输出，避免中文乱码',
+    color: '#5B9DFF',
+    env: { PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+  },
+  {
+    id: 'env-node',
+    name: 'Node 大内存',
+    desc: '前端构建时放宽堆上限',
+    color: '#9EFF00',
+    env: { NODE_OPTIONS: '--max-old-space-size=4096' },
+  },
+];
 
 const components: Component[] = [
   mkComponent({
@@ -111,6 +140,7 @@ const components: Component[] = [
     health: { url: 'http://127.0.0.1:8000/health', port: null, timeoutMs: 60000, retry: 30, intervalMs: 1000 },
   }),
   mkComponent({
+    envProfile: 'env-java17',
     id: 'fishery-backend-java',
     name: 'fishery-backend-java',
     projectId: 'backend',
@@ -315,7 +345,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.2.0',
+      version: '1.3.0',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -330,6 +360,7 @@ function snapshot(): Snapshot {
     },
     projects: JSON.parse(JSON.stringify(projects)),
     components: JSON.parse(JSON.stringify(components)),
+    environments: JSON.parse(JSON.stringify(environments)),
     templates: JSON.parse(JSON.stringify(templates)),
     settings: { ...settings },
     sessions: Object.values(sessions).map((s) => ({ ...s })),
@@ -424,6 +455,24 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   switch (cmd) {
     case 'bootstrap':
       return snapshot() as T;
+    case 'save_environment': {
+      const e = a.environment as Environment;
+      const i = environments.findIndex((x) => x.id === e.id);
+      if (i >= 0) environments[i] = e;
+      else {
+        e.id = e.id || uid('env');
+        environments.push(e);
+      }
+      return snapshot() as T;
+    }
+    case 'delete_environment': {
+      const i = environments.findIndex((x) => x.id === a.id);
+      if (i >= 0) environments.splice(i, 1);
+      components.forEach((c) => {
+        if (c.envProfile === a.id) c.envProfile = null;
+      });
+      return snapshot() as T;
+    }
     case 'save_component': {
       const p = a.component as Component;
       const i = components.findIndex((x) => x.id === p.id);
@@ -514,6 +563,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         projectId: projects[1]?.id ?? 'all',
         stack: 'imported',
         workdir: '~/work/imported',
+        envProfile: null,
         commands: [{ cmd: 'echo imported', join: 'and' }],
         env: {},
         ports: [],

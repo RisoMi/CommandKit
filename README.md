@@ -201,6 +201,21 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 
 ---
 
+## 4.5 环境（可复用的变量组）
+
+「环境」页维护命名变量组（`environments.json`），组件通过 `envProfile` **引用**它：
+
+- 环境提供基础变量，组件自身的 `env` 作为**覆盖**（同名优先），启动时合并注入。
+- 改环境 → 所有引用它的组件下次启动即生效，不用逐个改组件。
+- 删环境 → 引用它的组件回落到「不使用环境」，组件自己的覆盖变量保留（列表里会提示被引用次数）。
+- 导入导出的 JSON 会**自带被引用的环境**，换机器导入不会丢变量。
+
+```jsonc
+// environments.json
+[{ "id": "env-java17", "name": "Java 17", "desc": "JDK 17 + JAVA_HOME 注入",
+   "color": "#E8A33D", "env": { "JAVA_HOME": "/opt/jdk17", "PATH": "$JAVA_HOME/bin:$PATH" } }]
+```
+
 ## 4.6 组件配置导入 / 导出
 
 - **导出**：工作台勾选组件（单选或多选）→ 工具栏「导出配置 (N)」→ 选保存路径，得到
@@ -218,6 +233,7 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 | `bootstrap` | 返回全量快照（info / projects / categories / templates / settings / sessions / metrics / bulk） |
 | `save_project` `delete_project` | **项目**（组件分组）增改删（删除时组件回到「未归属」） |
 | `save_component` `delete_component` | **组件**增改删（返回新快照） |
+| `save_environment` `delete_environment` | 环境增改删（删除时引用它的组件回落到不使用环境） |
 | `save_template` `delete_template` | 模板增改删（模板在「项目工作台 → 从模板新建」里使用） |
 | `export_components` `import_components` | 组件配置导出 / 导入（JSON，支持单选与多选） |
 | `save_settings` | 设置保存（行数 300~20000 夹取，刷新 500~10000ms 夹取） |
@@ -249,7 +265,7 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 
 | 按键 | 作用 |
 | --- | --- |
-| `⌘/Ctrl + 1..4` | 切换 项目工作台 / 终端 / 进程监管 / 设置 |
+| `⌘/Ctrl + 1..5` | 切换 项目工作台 / 终端 / 环境 / 进程监管 / 设置 |
 | `Esc` | 关闭弹层 / 取消确认 |
 
 ---
@@ -295,8 +311,8 @@ commandkit/
 | --- | --- |
 | ![](docs/screenshots/workbench.png) | ![](docs/screenshots/bulk-run.png) |
 
-| 09 进程监管 | 从模板新建组件 |
+| 09 进程监管 | 环境管理 |
 | --- | --- |
-| ![](docs/screenshots/monitor.png) | ![](docs/screenshots/templates.png) |
+| ![](docs/screenshots/monitor.png) | ![](docs/screenshots/environments.png) |
 
 截图由 `node scripts/shots.mjs` 跑构建产物自动生成（演示数据，不启动真实进程）。

@@ -48,6 +48,7 @@ function useTemplate(t: Template) {
     projectId,
     stack: t.platform,
     workdir: t.workdir,
+    envProfile: null,
     commands: t.commands
       .filter((c) => c.cmd.trim())
       .map((c) => ({ cmd: c.cmd, join: 'and' as const })),

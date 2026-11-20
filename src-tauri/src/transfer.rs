@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::model::Component;
+use crate::model::{Component, Environment};
 use crate::state::AppState;
 use crate::store;
 
@@ -21,6 +21,8 @@ struct ExportFile<'a> {
     version: u32,
     exported_at: u64,
     components: Vec<&'a Component>,
+    /// 只带被导出组件引用到的环境，保证换机器导入后变量不丢
+    environments: Vec<&'a Environment>,
 }
 
 /// 写出 JSON 文件；ids 为空表示导出全部组件
@@ -36,12 +38,22 @@ pub fn export_to(state: &Arc<AppState>, ids: &[String], path: &str) -> Result<us
             return Err("没有可导出的组件".into());
         }
         let n = picked.len();
+        let used: std::collections::BTreeSet<String> = picked
+            .iter()
+            .filter_map(|c| c.env_profile.clone())
+            .collect();
+        let environments: Vec<&Environment> = data
+            .environments
+            .iter()
+            .filter(|e| used.contains(&e.id))
+            .collect();
         let payload = ExportFile {
             app: "CommandKit",
             kind: "components",
             version: 1,
             exported_at: store::now_ms(),
             components: picked,
+            environments,
         };
         let text = serde_json::to_string_pretty(&payload).map_err(|e| format!("序列化失败：{e}"))?;
         (text, n)
@@ -79,8 +91,35 @@ pub fn import_text(state: &Arc<AppState>, text: &str) -> Result<(usize, Vec<Stri
 
     let mut imported = 0usize;
     let mut skipped: Vec<String> = Vec::new();
+    let env_list: Vec<serde_json::Value> = value
+        .get("environments")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     {
         let mut data = state.data.lock().unwrap();
+
+        // 环境先落地：id 已存在就复用，否则新增并记录映射
+        let mut env_map: HashMap<String, String> = HashMap::new();
+        for item in env_list {
+            let Ok(mut env) = serde_json::from_value::<Environment>(item) else {
+                continue;
+            };
+            env.env.retain(|k, _| !k.trim().is_empty());
+            if env.env.is_empty() {
+                continue;
+            }
+            let old = env.id.clone();
+            if let Some(existing) = data.environments.iter().find(|e| e.id == old) {
+                env_map.insert(old, existing.id.clone());
+                continue;
+            }
+            if old.trim().is_empty() || data.environments.iter().any(|e| e.id == old) {
+                env.id = format!("env{}{}", store::now_ms(), data.environments.len());
+            }
+            env_map.insert(old, env.id.clone());
+            data.environments.push(env);
+        }
 
         // 先解析，拿到 oldId → 新 id 的映射，便于重写 dependsOn
         let mut parsed: Vec<(Option<String>, Component)> = Vec::new();
@@ -118,6 +157,19 @@ pub fn import_text(state: &Arc<AppState>, text: &str) -> Result<(usize, Vec<Stri
             if !project_ids.contains(&comp.project_id) {
                 comp.project_id = "all".into();
             }
+            // 环境引用：优先按导入映射改写；文件里没带的，如果本机已有同 id 就沿用
+            comp.env_profile = match comp.env_profile.clone() {
+                Some(p) => env_map
+                    .get(&p)
+                    .cloned()
+                    .or_else(|| {
+                        data.environments
+                            .iter()
+                            .any(|e| e.id == p)
+                            .then_some(p.clone())
+                    }),
+                None => None,
+            };
             comp.commands.retain(|s| !s.cmd.trim().is_empty());
             comp.name = comp.name.trim().to_string();
             if comp.name.is_empty() || comp.commands.is_empty() {
@@ -171,6 +223,10 @@ pub fn import_text(state: &Arc<AppState>, text: &str) -> Result<(usize, Vec<Stri
             comp.depends_on = deps;
         }
 
+        if !env_map.is_empty() {
+            data.save_environments()
+                .map_err(|e| format!("保存 environments.json 失败：{e}"))?;
+        }
         if imported > 0 {
             data.save_projects()
                 .map_err(|e| format!("保存 projects.json 失败：{e}"))?;
