@@ -237,6 +237,37 @@ async fn chain_and_stops_after_failure() {
     assert_eq!(view.exit_code, Some(5));
 }
 
+/// 停止兜底：进程忽略 SIGTERM 也必须从 Stopping 收敛到 Stopped
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_never_stuck_in_stopping() {
+    let sink = sink();
+    let state = make_state("stop-watchdog");
+    let cmd = if cfg!(windows) {
+        "Start-Sleep -Seconds 30"
+    } else {
+        "trap '' TERM; sleep 30"
+    };
+    let s = spec("t-stuck", cmd, None);
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    supervisor::stop(&sink, &state, "t-stuck").await.unwrap();
+
+    // 8 秒内必须离开 Starting/Running/Stopping
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let st = supervisor::get_session(&state, "t-stuck").unwrap().view().status;
+        if !matches!(st, Status::Starting | Status::Running | Status::Restarting | Status::Stopping) {
+            println!("ended with {st:?}");
+            break;
+        }
+        if tokio::time::Instant::now() > deadline {
+            panic!("停止后一直卡在 {st:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn non_zero_exit_marks_failed() {
     let sink = sink();

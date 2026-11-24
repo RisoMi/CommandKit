@@ -108,7 +108,12 @@ async function openFolder() {
     <div class="pops">
       <template v-if="isActive">
         <span class="pop" :class="{ off: status === 'stopping' }" @click="restartComponent(component.id)">重启</span>
-        <span class="pop stop" :class="{ off: status === 'stopping' }" @click="stopComponent(component.id)">停止</span>
+        <span
+          class="pop stop"
+          :class="{ off: status === 'stopping' }"
+          @click="status !== 'stopping' && stopComponent(component.id)"
+          >停止</span
+        >
         <span class="pop" @click="openBulk(component.id)">终端</span>
       </template>
       <template v-else>

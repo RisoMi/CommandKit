@@ -599,7 +599,10 @@ pub async fn start(
     push_chunk(
         &sink,
         &session,
-        &format!("\u{1b}[90m# 独立会话 · cwd={} · env 由 Rust 注入\u{1b}[0m\n", spec.workdir),
+        &format!(
+            "\u{1b}[90m# 独立会话 · shell={} · cwd={} · env 由 Rust 注入\u{1b}[0m\n",
+            shell, spec.workdir
+        ),
         "out",
     );
     push_chunk(&sink, &session, &format!("\u{1b}[32m$\u{1b}[0m {}\n", spec.command), "out");
@@ -749,8 +752,24 @@ async fn run_chain(
         };
 
         let pid = child.id();
-        {
-            session.inner.lock().unwrap().pid = pid;
+        let spawn_ms = {
+            let mut inner = session.inner.lock().unwrap();
+            inner.pid = pid;
+            inner
+                .started_instant
+                .map(|t| t.elapsed().as_millis())
+                .unwrap_or(0)
+        };
+        if spawn_ms >= 500 {
+            push_chunk(
+                &sink,
+                &session,
+                &format!(
+                    "\u{1b}[33m# 启动较慢：距点击已 {}ms（shell 冷启动 / 端口预检 / 目录在慢速盘上）\u{1b}[0m\n",
+                    spawn_ms
+                ),
+                "err",
+            );
         }
 
         if let Some(mut sin) = child.stdin.take() {
@@ -765,6 +784,33 @@ async fn run_chain(
                 }
             });
         }
+        // 15s 一条输出都没有 → 给出可操作的提示，避免用户以为「卡死没反应」
+        {
+            let seq_at_spawn = session.inner.lock().unwrap().seq;
+            let hint_sink = sink.clone();
+            let hint_session = session.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                let (seq_now, status, stopping) = {
+                    let i = hint_session.inner.lock().unwrap();
+                    (i.seq, i.status, i.stopping)
+                };
+                if stopping || seq_now != seq_at_spawn {
+                    return;
+                }
+                if !matches!(status, Status::Starting | Status::Running) {
+                    return;
+                }
+                push_chunk(
+                    &hint_sink,
+                    &hint_session,
+                    "\u{1b}[33m# 已等待 15s 仍无任何输出：命令可能在等输入、访问网络盘，或 shell 启动很慢。\
+可点「打开外部终端」用同一命令对照，或换个 shell 试试\u{1b}[0m\n",
+                    "err",
+                );
+            });
+        }
+
         if let Some(out) = child.stdout.take() {
             tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
         }
@@ -1056,14 +1102,74 @@ pub async fn stop(
     emit_session(sink, &session);
 
     if let Some(pid) = pid {
-        if let Err(e) = procs::terminate_tree(pid).await {
-            let mut inner = session.inner.lock().unwrap();
-            inner.error = Some(e.clone());
-            inner.status = Status::Failed;
-            drop(inner);
-            emit_session(sink, &session);
-            return Err(e);
+        // taskkill / kill(-pgid) 自己也可能卡住（进程卡在内核态、句柄不可中断），必须加超时
+        match tokio::time::timeout(Duration::from_secs(4), procs::terminate_tree(pid)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let mut inner = session.inner.lock().unwrap();
+                inner.error = Some(e.clone());
+                inner.status = Status::Failed;
+                drop(inner);
+                emit_session(sink, &session);
+                return Err(e);
+            }
+            Err(_) => {
+                push_chunk(
+                    sink,
+                    &session,
+                    "\u{1b}[33m# 终止命令超时（4s），继续等待进程退出…\u{1b}[0m\n",
+                    "err",
+                );
+            }
         }
+    }
+
+    // 看门狗：任何情况下都不能让界面永远停在「停止中」
+    {
+        let sink2 = sink.clone();
+        let session2 = session.clone();
+        tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                if session2.status() != Status::Stopping {
+                    return;
+                }
+                if Instant::now() < deadline {
+                    continue;
+                }
+                // 最后一枪，然后强制收敛状态
+                let pid = session2.inner.lock().unwrap().pid;
+                if let Some(pid) = pid {
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        procs::terminate_tree(pid),
+                    )
+                    .await;
+                }
+                {
+                    let mut inner = session2.inner.lock().unwrap();
+                    if inner.status != Status::Stopping {
+                        return;
+                    }
+                    inner.status = Status::Stopped;
+                    inner.stopping = true;
+                    inner.pid = None;
+                    inner.stdin = None;
+                    inner.health_ok = false;
+                    inner.ended_at = Some(store::now_ms());
+                    inner.error = Some("进程未响应终止信号，已强制标记为已停止（可能仍在后台存活）".into());
+                }
+                emit_session(&sink2, &session2);
+                push_chunk(
+                    &sink2,
+                    &session2,
+                    "\u{1b}[33m# 进程未响应终止，已强制标记为已停止；如仍占用端口请手动结束\u{1b}[0m\n",
+                    "err",
+                );
+                return;
+            }
+        });
     }
     Ok(())
 }
