@@ -85,10 +85,10 @@ await page.waitForTimeout(2600);
 await page.screenshot({ path: join(OUT, '03-bulk-done.png') });
 
 // 切换标签：终端内容必须跟着换，不能残留上一个会话的缓冲
-await page.locator('.tab', { hasText: 'fishery-web' }).first().click();
+await page.locator('.tab', { hasText: 'web-app' }).first().click();
 await page.waitForTimeout(400);
 const termText = await page.locator('.term').first().innerText();
-if (!termText.includes('ocean-fishery-code/web')) {
+if (!termText.includes('web-app')) {
   throw new Error(`切换标签后终端内容未更新：${termText.slice(0, 120)}`);
 }
 
@@ -101,7 +101,7 @@ if (!termText.includes('应用启动完成')) {
 await page.getByRole('button', { name: '复制输出' }).click();
 await page.waitForTimeout(300);
 const clip = await page.evaluate(() => navigator.clipboard.readText());
-if (!clip.includes('ocean-fishery-code/web') || clip.includes('\u001b[')) {
+if (!clip.includes('web-app') || clip.includes('\u001b[')) {
   throw new Error(`复制内容不正确：${clip.slice(0, 120)}`);
 }
 await page.screenshot({ path: join(OUT, '03b-term-switch.png') });

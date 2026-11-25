@@ -104,48 +104,48 @@ const environments: Environment[] = [
 
 const components: Component[] = [
   mkComponent({
-    id: 'fishery-web',
-    name: 'fishery-web',
+    id: 'web-app',
+    name: 'web-app',
     projectId: 'frontend',
     stack: 'npm dev',
-    workdir: '~/work/ocean-fishery-code/web',
+    workdir: '~/work/web-app',
     commands: [{ cmd: 'npm run dev -- --port 5173', join: 'and' }],
     ports: [5173],
-    dependsOn: ['fishery-agent'],
+    dependsOn: ['api-service'],
   }),
   mkComponent({
-    id: 'admin-vue',
-    name: 'admin-vue',
+    id: 'admin-console',
+    name: 'admin-console',
     projectId: 'frontend',
     stack: 'vite',
-    workdir: '~/work/admin-vue',
+    workdir: '~/work/admin-console',
     commands: [{ cmd: 'npm run dev -- --port 5174', join: 'and' }],
     ports: [5174],
-    dependsOn: ['fishery-agent'],
+    dependsOn: ['api-service'],
   }),
   mkComponent({
-    id: 'fishery-agent',
-    name: 'fishery-agent',
+    id: 'api-service',
+    name: 'api-service',
     projectId: 'backend',
     stack: 'Python 3.11',
-    workdir: '~/work/fishery-agent',
+    workdir: '~/work/api-service',
     commands: [{ cmd: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000', join: 'and' }],
     env: {
       PYTHON_HOME: '~/pyenv/versions/3.11',
       OLLAMA_HOST: 'http://127.0.0.1:11434',
-      JWT_SECRET: 'ocean-data-system-jwt-secret-key-2024',
+      JWT_SECRET: 'demo-secret-change-me',
     },
     ports: [8000],
-    dependsOn: ['redis-local', 'fishery-backend-java'],
+    dependsOn: ['redis-local', 'report-service'],
     health: { url: 'http://127.0.0.1:8000/health', port: null, timeoutMs: 60000, retry: 30, intervalMs: 1000 },
   }),
   mkComponent({
     envProfile: 'env-java17',
-    id: 'fishery-backend-java',
-    name: 'fishery-backend-java',
+    id: 'report-service',
+    name: 'report-service',
     projectId: 'backend',
-    stack: 'Java 17',
-    workdir: '~/work/fishery-backend-java',
+    stack: 'Spring Boot',
+    workdir: '~/work/report-service',
     commands: [{ cmd: './gradlew bootRun --args=--server.port=8080', join: 'and' }],
     ports: [8080],
     dependsOn: ['redis-local'],
@@ -173,11 +173,11 @@ const components: Component[] = [
 const templates: Template[] = [
   {
     id: 'tpl-webgis',
-    name: 'WebGIS 服务启动',
-    desc: '为 fishery-agent 准备 JDK 17、Python 与 Maven 构建环境，切目录后按序执行版本校验与构建。',
+    name: '后端服务构建',
+    desc: '切到服务目录后依次校验 JDK / Python / Maven 版本，再执行构建。',
     platform: 'macos',
     shell: null,
-    workdir: '~/work/fishery-agent',
+    workdir: '~/work/api-service',
     env: {
       JAVA_HOME: '/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home',
       MAVEN_HOME: '/opt/homebrew/opt/maven',
@@ -197,7 +197,7 @@ const templates: Template[] = [
     desc: '锁定 Node 版本、清理缓存后构建，产物输出到 dist。',
     platform: 'macos',
     shell: null,
-    workdir: '~/work/ocean-fishery-code/web',
+    workdir: '~/work/web-app',
     env: {},
     commands: [
       { cmd: 'node -v', tag: '校验' },
@@ -210,9 +210,9 @@ const templates: Template[] = [
 
 const t0 = now();
 const sessions: Record<string, SessionView> = {
-  'fishery-web': {
-    id: 'fishery-web',
-    name: 'fishery-web',
+  'web-app': {
+    id: 'web-app',
+    name: 'web-app',
     kind: 'project',
     status: 'running',
     pid: 18422,
@@ -223,13 +223,13 @@ const sessions: Record<string, SessionView> = {
     restarts: 0,
     healthOk: true,
     command: 'npm run dev -- --port 5173',
-    workdir: '~/work/ocean-fishery-code/web',
+    workdir: '~/work/web-app',
     ports: [5173],
     projectId: 'frontend',
   },
-  'admin-vue': {
-    id: 'admin-vue',
-    name: 'admin-vue',
+  'admin-console': {
+    id: 'admin-console',
+    name: 'admin-console',
     kind: 'project',
     status: 'starting',
     pid: null,
@@ -240,13 +240,13 @@ const sessions: Record<string, SessionView> = {
     restarts: 0,
     healthOk: false,
     command: 'npm run dev -- --port 5174',
-    workdir: '~/work/admin-vue',
+    workdir: '~/work/admin-console',
     ports: [5174],
     projectId: 'frontend',
   },
-  'fishery-agent': {
-    id: 'fishery-agent',
-    name: 'fishery-agent',
+  'api-service': {
+    id: 'api-service',
+    name: 'api-service',
     kind: 'project',
     status: 'running',
     pid: 18104,
@@ -257,13 +257,13 @@ const sessions: Record<string, SessionView> = {
     restarts: 0,
     healthOk: true,
     command: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000',
-    workdir: '~/work/fishery-agent',
+    workdir: '~/work/api-service',
     ports: [8000],
     projectId: 'backend',
   },
-  'fishery-backend-java': {
-    id: 'fishery-backend-java',
-    name: 'fishery-backend-java',
+  'report-service': {
+    id: 'report-service',
+    name: 'report-service',
     kind: 'project',
     status: 'running',
     pid: 17980,
@@ -274,7 +274,7 @@ const sessions: Record<string, SessionView> = {
     restarts: 0,
     healthOk: true,
     command: './gradlew bootRun --args=--server.port=8080',
-    workdir: '~/work/fishery-backend-java',
+    workdir: '~/work/report-service',
     ports: [8080],
     projectId: 'backend',
   },
@@ -315,27 +315,27 @@ const sessions: Record<string, SessionView> = {
 };
 
 const metrics: Record<string, MetricRow> = {
-  'fishery-web': { id: 'fishery-web', pid: 18422, cpu: 3.2, mem: 724 * 1024 * 1024, children: 4 },
-  'admin-vue': { id: 'admin-vue', pid: null, cpu: 0, mem: 0, children: 0 },
-  'fishery-agent': { id: 'fishery-agent', pid: 18104, cpu: 5.1, mem: 386 * 1024 * 1024, children: 2 },
-  'fishery-backend-java': { id: 'fishery-backend-java', pid: 17980, cpu: 2.8, mem: 612 * 1024 * 1024, children: 1 },
+  'web-app': { id: 'web-app', pid: 18422, cpu: 3.2, mem: 724 * 1024 * 1024, children: 4 },
+  'admin-console': { id: 'admin-console', pid: null, cpu: 0, mem: 0, children: 0 },
+  'api-service': { id: 'api-service', pid: 18104, cpu: 5.1, mem: 386 * 1024 * 1024, children: 2 },
+  'report-service': { id: 'report-service', pid: 17980, cpu: 2.8, mem: 612 * 1024 * 1024, children: 1 },
   'redis-local': { id: 'redis-local', pid: 17502, cpu: 1.3, mem: 42 * 1024 * 1024, children: 0 },
   'postgres-local': { id: 'postgres-local', pid: null, cpu: 0, mem: 0, children: 0 },
 };
 
 const logs: Record<string, LogChunk[]> = {
-  'fishery-agent': [
-    { seq: 1, stream: 'out', data: '\x1b[90m# 独立会话 · cwd=~/work/fishery-agent · env 由 Rust 注入\x1b[0m\n' },
+  'api-service': [
+    { seq: 1, stream: 'out', data: '\x1b[90m# 独立会话 · cwd=~/work/api-service · env 由 Rust 注入\x1b[0m\n' },
     { seq: 2, stream: 'out', data: '\x1b[32m$\x1b[0m py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000\n' },
     { seq: 3, stream: 'out', data: '\x1b[90m[13:02:41] INFO  Loaded env: PYTHON_HOME, OLLAMA_HOST, JWT_SECRET\x1b[0m\n' },
     { seq: 4, stream: 'out', data: '\x1b[90m[13:02:42] INFO  Connecting redis://127.0.0.1:6379 ... \x1b[0m\x1b[32mok\x1b[0m\n' },
     { seq: 5, stream: 'out', data: '\x1b[90m[13:02:43] INFO  LangGraph graph compiled: 7 nodes, 9 edges\x1b[0m\n' },
     { seq: 6, stream: 'out', data: '\x1b[32m[13:02:44] INFO  Application startup complete.\x1b[0m\n' },
-    { seq: 7, stream: 'out', data: '\x1b[33m[13:03:10] WARN 上游 fishery-backend-java 健康检查重试 1/3\x1b[0m\n' },
+    { seq: 7, stream: 'out', data: '\x1b[33m[13:03:10] WARN 上游 report-service 健康检查重试 1/3\x1b[0m\n' },
     { seq: 8, stream: 'out', data: '\x1b[32m[13:03:12] INFO  Upstream ready, health check passed\x1b[0m\n' },
     { seq: 9, stream: 'out', data: '\x1b[90m[13:04:02] INFO  127.0.0.1:51234 - "GET /health 200 OK"\x1b[0m\n' },
   ],
-  'fishery-web': [],
+  'web-app': [],
 
 };
 
@@ -345,7 +345,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.3.1',
+      version: '1.3.2',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,

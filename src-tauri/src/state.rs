@@ -413,12 +413,12 @@ fn seed_templates() -> Vec<Template> {
     vec![
         Template {
             id: "tpl-webgis".into(),
-            name: "WebGIS 服务启动".into(),
-            desc: "为 fishery-agent 准备 JDK 17、Python 与 Maven 构建环境，切目录后按序执行版本校验与构建。"
+            name: "后端服务构建".into(),
+            desc: "切到服务目录后依次校验 JDK / Python / Maven 版本，再执行构建。"
                 .into(),
             platform: if win { "windows".into() } else { "macos".into() },
             shell: None,
-            workdir: if win { "D:\\work\\fishery-agent".into() } else { "$HOME/work/fishery-agent".into() },
+            workdir: if win { "D:\\work\\api-service".into() } else { "$HOME/work/api-service".into() },
             env,
             commands,
             updated_at: now,
@@ -429,7 +429,7 @@ fn seed_templates() -> Vec<Template> {
             desc: "锁定 Node 版本、清理缓存后构建，产物输出到 dist。".into(),
             platform: if win { "windows".into() } else { "macos".into() },
             shell: None,
-            workdir: if win { "D:\\work\\ocean-fishery-code\\web".into() } else { "$HOME/work/ocean-fishery-code/web".into() },
+            workdir: if win { "D:\\work\\web-app".into() } else { "$HOME/work/web-app".into() },
             env: Default::default(),
             commands: vec![
                 TemplateCommand { cmd: "node -v".into(), tag: "校验".into() },

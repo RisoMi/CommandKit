@@ -178,7 +178,7 @@ function drop() {
         <div class="row">
           <div class="field" style="flex: 2">
             <label>组件名称 *</label>
-            <input v-model="draft.name" placeholder="fishery-agent" />
+            <input v-model="draft.name" placeholder="例如 api-service" />
           </div>
           <div class="field" style="flex: 1.2">
             <label>所属项目</label>
@@ -194,7 +194,7 @@ function drop() {
 
         <div class="field">
           <label>工作目录 *</label>
-          <input v-model="draft.workdir" placeholder="D:\work\fishery-agent 或 ~/work/fishery-agent" />
+          <input v-model="draft.workdir" placeholder="D:\work\api-service 或 ~/work/api-service" />
           <span class="hint">支持 ~ 展开；目录不存在时启动会直接报错，不会静默回退到 cwd。</span>
         </div>
 
