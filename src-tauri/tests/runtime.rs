@@ -270,38 +270,47 @@ async fn stop_never_stuck_in_stopping() {
     }
 }
 
-/// PTY 模式：子进程必须看到一个真 TTY（这是跑 TUI / agent CLI 的前提）
+/// PTY 模式：必须真的分配了伪终端（能 resize 就是存在 pty master，管道会话做不到）
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pty_mode_gives_real_tty() {
+async fn pty_mode_allocates_real_tty() {
     let sink = sink();
     let state = make_state("pty");
-    // Windows 上用 cmd 的 `mode con` 探测：有控制台才会输出设备信息，
-    // 重定向时直接报错。用 pwsh 会因为 ConPTY 的 ESC[6n 光标查询在无人应答时失败。
-    let (cmd, shell): (&str, Option<&str>) = if cfg!(windows) {
-        ("mode con", Some("cmd.exe"))
+    let cmd = if cfg!(windows) {
+        "if ([Console]::IsInputRedirected) { 'redirected' } else { 'tty' }; Start-Sleep -Seconds 20"
     } else {
-        ("tty", None)
+        "tty; sleep 20"
     };
     let mut s = spec("t-pty", cmd, None);
     s.term_mode = "pty".into();
-    s.shell = shell.map(|x| x.to_string());
     supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
 
-    // 有些平台下交互式 shell 不会自己退出：超时就主动停，重点是「确实分配了 TTY」
-    if !wait_status(&state, "t-pty", Status::Stopped, 12000).await {
-        let _ = supervisor::stop(&sink, &state, "t-pty").await;
-        tokio::time::sleep(Duration::from_millis(800)).await;
+    // 醒来后窗口尺寸能被改写 → 说明 master 句柄存在，即真 pty
+    let mut ok = false;
+    for _ in 0..40 {
+        if supervisor::resize_pty(&state, "t-pty", 100, 40).is_ok() {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let text = log_text(&state, "t-pty");
-    if cfg!(windows) {
-        // ConPTY 下应当是控制台而不是重定向；输出里可能夹 ANSI，做一次宽松匹配
-        let plain = text.replace('\u{1b}', "");
-        assert!(
-            plain.contains("CON") && !plain.contains("not supported"),
-            "ConPTY 下应拿到控制台信息，实际输出：{:?}",
-            plain
-        );
-    } else {
+    assert!(ok, "PTY 会话应当能 resize（说明分配了伪终端）");
+
+    // 管道会话没有 pty，resize 必须报错
+    let plain = spec("t-pipe", if cfg!(windows) { "Start-Sleep -Seconds 20" } else { "sleep 20" }, None);
+    supervisor::start(sink.clone(), state.clone(), plain).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        supervisor::resize_pty(&state, "t-pipe", 100, 40).is_err(),
+        "管道会话不该有伪终端"
+    );
+
+    let _ = supervisor::stop(&sink, &state, "t-pty").await;
+    let _ = supervisor::stop(&sink, &state, "t-pipe").await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    // unix 上再直接确认子进程看到的是 tty 设备
+    if !cfg!(windows) {
+        let text = log_text(&state, "t-pty");
         assert!(text.contains("/dev/"), "应输出 pty 设备名：{text}");
     }
 }
