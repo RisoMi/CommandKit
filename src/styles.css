@@ -1047,17 +1047,25 @@ table.p td.mono {
 }
 
 /* ---------------------------------------------------------------- 抽屉 / 弹层 */
+select:disabled,
+input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(4, 5, 6, 0.62);
-  backdrop-filter: blur(1.5px);
+  /* 不要用 backdrop-filter：全屏模糊会让每次弹窗内部重排都触发整屏重新合成，
+     在 Windows/WebView2 上表现为「切换选项卡一下」。改用更实的纯色蒙层。 */
+  background: rgba(4, 5, 6, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 60;
 }
 .modal {
+  /* 把布局 / 绘制限制在弹窗内部，避免内容变化影响整页 */
+  contain: layout paint;
   width: 720px;
   max-width: calc(100vw - 60px);
   max-height: calc(100vh - 90px);

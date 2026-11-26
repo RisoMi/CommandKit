@@ -77,9 +77,12 @@ const envHint = computed(() =>
 );
 const shellHint = computed(() => shellInvocation(effectiveShell.value, firstCmd.value));
 
+/** 打开弹窗时的组件快照：编辑期间不会因为外部刷新而重排依赖列表 */
+const componentsAtOpen = state.components.slice();
+
 /** 依赖候选：同项目的其它组件优先，其余按项目分组排序 */
 const otherComponents = computed(() =>
-  state.components
+  componentsAtOpen
     .filter((c) => c.id !== draft.id)
     .slice()
     .sort((a, b) => {
@@ -246,9 +249,9 @@ function drop() {
             <label>端口（逗号分隔）</label>
             <input v-model="portsText" placeholder="8000, 8001" />
           </div>
-          <div v-if="termSel !== 'pty'" class="field">
+          <div class="field">
             <label>标准输入</label>
-            <select v-model="stdinSel">
+            <select v-model="stdinSel" :disabled="termSel === 'pty'" :title="termSel === 'pty' ? '伪终端由 PTY 统一处理输入' : ''">
               <option value="pipe">可输入（默认）</option>
               <option value="null">关闭（立即 EOF）</option>
             </select>
@@ -280,9 +283,7 @@ function drop() {
         <span class="hint" style="margin-top: -4px">
           <b>伪终端</b>会分配真 TTY（isatty / raw mode / 窗口尺寸），可跑 claude、vim、top 这类交互程序，
           但 stdout 与 stderr 会合并成一路；<b>管道</b>模式能区分错误行，但 TUI 程序无法工作。
-          <template v-if="termSel !== 'pty'">
-            另外，有些 CLI 会等 stdin 才继续（如 <code>claude --print</code>），把标准输入设为「关闭」可立即 EOF。
-          </template>
+          有些 CLI 会等 stdin 才继续（如 <code>claude --print</code>），管道模式下把标准输入设为「关闭」可立即 EOF。
         </span>
 
         <div class="section-t">环境</div>
