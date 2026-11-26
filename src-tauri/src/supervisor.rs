@@ -756,23 +756,26 @@ impl StepWaiter {
                 },
             },
             StepWaiter::Pty(mut c) => {
-                // portable-pty 的 wait 是阻塞的，丢到阻塞线程池
-                match tokio::task::spawn_blocking(move || c.wait()).await {
-                    Ok(Ok(st)) => Outcome {
-                        code: Some(st.exit_code() as i32),
-                        success: st.success(),
-                        error: None,
-                    },
-                    Ok(Err(e)) => Outcome {
-                        code: None,
-                        success: false,
-                        error: Some(e.to_string()),
-                    },
-                    Err(e) => Outcome {
-                        code: None,
-                        success: false,
-                        error: Some(e.to_string()),
-                    },
+                // 不用 spawn_blocking：万一进程不退出，阻塞线程会一直挂着
+                // （测试运行时会等在阻塞任务上永久卡死）。这里异步轮询。
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(st)) => {
+                            return Outcome {
+                                code: Some(st.exit_code() as i32),
+                                success: st.success(),
+                                error: None,
+                            }
+                        }
+                        Ok(None) => tokio::time::sleep(Duration::from_millis(80)).await,
+                        Err(e) => {
+                            return Outcome {
+                                code: None,
+                                success: false,
+                                error: Some(e.to_string()),
+                            }
+                        }
+                    }
                 }
             }
         }

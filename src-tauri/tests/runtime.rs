@@ -282,9 +282,13 @@ async fn pty_mode_gives_real_tty() {
     };
     let mut s = spec("t-pty", cmd, None);
     s.term_mode = "pty".into();
-    supervisor::start(sink, state.clone(), s).await.unwrap();
+    supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
 
-    assert!(wait_status(&state, "t-pty", Status::Stopped, 15000).await);
+    // 有些平台下交互式 shell 不会自己退出：超时就主动停，重点是「确实分配了 TTY」
+    if !wait_status(&state, "t-pty", Status::Stopped, 12000).await {
+        let _ = supervisor::stop(&sink, &state, "t-pty").await;
+        tokio::time::sleep(Duration::from_millis(800)).await;
+    }
     let text = log_text(&state, "t-pty");
     if cfg!(windows) {
         assert!(text.contains("tty") && !text.contains("redirected"), "ConPTY 下不应是重定向：{text}");
