@@ -359,7 +359,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.4.0',
+      version: '1.4.1',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,

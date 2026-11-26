@@ -1,7 +1,7 @@
 {
   "name": "commandkit",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "CommandKit · 命令环境模板与多项目进程管理（Tauri 2）",
   "scripts": {

@@ -4,7 +4,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { api } from '../api';
-import { state, term, toast } from '../store';
+import { state, term } from '../store';
 
 /**
  * 伪终端渲染器：xterm.js 解释 ANSI / 光标控制，按键逐字转发给 PTY。
@@ -71,11 +71,17 @@ function create() {
 
   // 尺寸同步给 PTY，TUI 才能正确布局
   xterm.onResize(({ cols, rows }) => {
+    const st = state.sessions[props.id]?.status;
+    if (!st || !['starting', 'running', 'restarting'].includes(st)) return;
     api.resizePty(props.id, cols, rows).catch(() => undefined);
   });
   // 按键 / 组合键 / 方向键：原样转发
+  // 注意：xterm 对 ESC[6n 等设备查询会自动应答，也应答走 onData；
+  // 会话停下后这些应答不该再打扰用户，所以做状态判断 + 静默失败。
   xterm.onData((data) => {
-    api.sendInput(props.id, data).catch((e) => toast('error', String(e)));
+    const st = state.sessions[props.id]?.status;
+    if (!st || !['starting', 'running', 'restarting'].includes(st)) return;
+    api.sendInput(props.id, data).catch(() => undefined);
   });
 
   requestAnimationFrame(() => {

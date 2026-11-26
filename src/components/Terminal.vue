@@ -52,7 +52,7 @@ async function send() {
   const text = input.value;
   input.value = '';
   try {
-    await api.sendInput(props.id, `${text}\n`);
+    await api.sendInput(props.id, `${text}\n`).catch(() => undefined);
   } catch (e) {
     toast('error', String(e));
   }

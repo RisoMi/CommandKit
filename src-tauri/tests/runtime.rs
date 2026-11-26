@@ -337,6 +337,20 @@ async fn null_stdin_returns_eof_immediately() {
     assert!(text.contains("got:"), "读到 EOF 后应继续执行：{text}");
 }
 
+/// 会话结束后再写 stdin 应该被静默忽略（xterm 会自动应答 ESC[6n，不能刷屏报错）
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn input_after_stop_is_silently_ignored() {
+    let sink = sink();
+    let state = make_state("stdin-after-stop");
+    let s = spec("t-after", "echo done", None);
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+    assert!(wait_status(&state, "t-after", Status::Stopped, 12000).await);
+
+    // 已停止：不报错、不 panic
+    let r = supervisor::send_input(&state, "t-after", "\u{1b}[1;1R");
+    assert!(r.is_ok(), "停止后写 stdin 应静默忽略，实际：{r:?}");
+}
+
 /// 命中已知报错时，终端里要能看到那条可操作提示
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn known_cli_failure_gets_actionable_hint() {

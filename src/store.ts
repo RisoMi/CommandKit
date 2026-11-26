@@ -109,9 +109,20 @@ export function resolveConfirm(v: boolean) {
 // ---------------------------------------------------------------- toast
 
 let toastSeq = 0;
+const recentToasts = new Map<string, number>();
+
 export function toast(level: ToastItem['level'], text: string) {
+  // 同样的错误在 2s 内只提醒一次：xterm 的自动应答、批量停止等场景会连续触发
+  const key = `${level}:${text}`;
+  const now = Date.now();
+  const last = recentToasts.get(key) ?? 0;
+  if (now - last < 2000) return;
+  recentToasts.set(key, now);
+
   const item: ToastItem = { id: ++toastSeq, level, text };
   state.toasts.push(item);
+  // 同屏最多 4 条，避免刷屏盖住界面
+  if (state.toasts.length > 4) state.toasts.splice(0, state.toasts.length - 4);
   const ttl = level === 'error' ? 6000 : 3200;
   window.setTimeout(() => {
     const idx = state.toasts.findIndex((t) => t.id === item.id);

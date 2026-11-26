@@ -1515,10 +1515,22 @@ pub fn send_input(state: &Arc<AppState>, id: &str, data: &str) -> Result<(), Str
         sessions.get(id).cloned()
     }
     .ok_or_else(|| format!("会话不存在：{id}"))?;
-    let (pty_tx, line_tx) = {
+    let (pty_tx, line_tx, active) = {
         let inner = session.inner.lock().unwrap();
-        (inner.pty_stdin.clone(), inner.stdin.clone())
+        (
+            inner.pty_stdin.clone(),
+            inner.stdin.clone(),
+            matches!(
+                inner.status,
+                Status::Starting | Status::Running | Status::Restarting
+            ),
+        )
     };
+    // 已停止 / 已结束的会话：xterm 仍可能为 ESC[6n 之类自动应答回写，直接丢掉，
+    // 不要报错（否则界面会被「没有可写 stdin」刷屏）
+    if !active {
+        return Ok(());
+    }
     // PTY 会话必须逐字节转发（TUI 的按键、方向键、Ctrl 组合）
     if let Some(tx) = pty_tx {
         return tx
