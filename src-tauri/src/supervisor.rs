@@ -981,7 +981,7 @@ async fn run_chain(
                 ),
                 "out",
             );
-        } else {
+        } else if steps.len() > 1 {
             push_chunk(
                 &sink,
                 &session,
@@ -989,6 +989,7 @@ async fn run_chain(
                 "out",
             );
         }
+        // 单步命令的 "$ cmd" 已由 start() 的横幅打印，避免重复
 
         let (waiter, master) = match spawn_step(&sink, &session, &spec, &shell, &step.cmd) {
             Ok(v) => v,

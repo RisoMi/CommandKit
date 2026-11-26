@@ -275,13 +275,16 @@ async fn stop_never_stuck_in_stopping() {
 async fn pty_mode_gives_real_tty() {
     let sink = sink();
     let state = make_state("pty");
-    let cmd = if cfg!(windows) {
-        "if ([Console]::IsInputRedirected) { 'redirected' } else { 'tty' }"
+    // Windows 上用 cmd 的 `mode con` 探测：有控制台才会输出设备信息，
+    // 重定向时直接报错。用 pwsh 会因为 ConPTY 的 ESC[6n 光标查询在无人应答时失败。
+    let (cmd, shell): (&str, Option<&str>) = if cfg!(windows) {
+        ("mode con", Some("cmd.exe"))
     } else {
-        "tty"
+        ("tty", None)
     };
     let mut s = spec("t-pty", cmd, None);
     s.term_mode = "pty".into();
+    s.shell = shell.map(|x| x.to_string());
     supervisor::start(sink.clone(), state.clone(), s).await.unwrap();
 
     // 有些平台下交互式 shell 不会自己退出：超时就主动停，重点是「确实分配了 TTY」
@@ -294,8 +297,8 @@ async fn pty_mode_gives_real_tty() {
         // ConPTY 下应当是控制台而不是重定向；输出里可能夹 ANSI，做一次宽松匹配
         let plain = text.replace('\u{1b}', "");
         assert!(
-            plain.contains("tty") && !plain.contains("redirected"),
-            "ConPTY 下不应是重定向，实际输出：{:?}",
+            plain.contains("CON") && !plain.contains("not supported"),
+            "ConPTY 下应拿到控制台信息，实际输出：{:?}",
             plain
         );
     } else {
