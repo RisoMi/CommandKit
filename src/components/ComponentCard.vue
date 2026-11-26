@@ -58,6 +58,7 @@ async function openFolder() {
       <i class="dot" :class="status"></i>
       <span class="pname" :title="component.name">{{ component.name }}</span>
       <span v-if="showProject" class="tag projtag">{{ projectName(component.projectId) }}</span>
+      <span v-if="component.termMode === 'pty'" class="tag ttytag" title="伪终端（可跑 TUI）">TTY</span>
       <span v-if="envName" class="tag envtag" :title="`环境：${envName}`">{{ envName }}</span>
       <span v-if="component.stack" class="tag">{{ component.stack }}</span>
       <div class="cardactions">
@@ -159,6 +160,10 @@ async function openFolder() {
 .envtag {
   color: #8fbf6a;
   border-color: #2f4225;
+}
+.ttytag {
+  color: #8bbcff;
+  border-color: #26364a;
 }
 .iconbtn {
   flex: none;

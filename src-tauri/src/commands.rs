@@ -544,6 +544,11 @@ pub fn session_log(state: St<'_>, id: String) -> Vec<LogChunk> {
 }
 
 #[tauri::command]
+pub fn resize_pty_cmd(state: St<'_>, id: String, cols: u16, rows: u16) -> Result<(), String> {
+    supervisor::resize_pty(state.inner(), &id, cols, rows)
+}
+
+#[tauri::command]
 pub fn clear_session_log(state: St<'_>, id: String) {
     supervisor::clear_log(state.inner(), &id);
 }

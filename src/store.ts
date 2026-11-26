@@ -29,6 +29,8 @@ interface TermState {
   pending: string;
   counter: number;
   loaded: boolean;
+  /** PTY 会话保留原始字节流（含光标控制），交给 xterm 渲染 */
+  raw: string[];
 }
 
 interface ToastItem {
@@ -126,7 +128,7 @@ let flushScheduled = false;
 function ensureTerm(id: string): TermState {
   let t = term[id];
   if (!t) {
-    t = { lines: [], pending: '', counter: 0, loaded: false };
+    t = { lines: [], pending: '', counter: 0, loaded: false, raw: [] };
     term[id] = t;
   }
   return t;
@@ -166,7 +168,12 @@ function scheduleFlush() {
       const data = rawQueue[id];
       delete rawQueue[id];
       const t = ensureTerm(id);
-      feed(t, data);
+      if (state.sessions[id]?.termMode === 'pty') {
+        // 伪终端要靠 xterm 解释 ANSI / 光标控制，不能按行解析
+        t.raw.push(data);
+      } else {
+        feed(t, data);
+      }
     }
   });
 }
@@ -186,6 +193,11 @@ export async function hydrateTerm(id: string) {
     t.lines = [];
     t.pending = '';
     t.counter = 0;
+    t.raw = [];
+    if (state.sessions[id]?.termMode === 'pty') {
+      for (const c of chunks) t.raw.push(c.data);
+      return;
+    }
     for (const c of chunks) feed(t, c.data);
   } catch {
     /* 会话可能已销毁 */
@@ -203,6 +215,7 @@ export async function clearTerm(id: string) {
   t.lines = [];
   t.pending = '';
   t.counter = 0;
+  t.raw = [];
   await api.clearLog(id).catch(() => undefined);
 }
 
@@ -496,6 +509,7 @@ export function newComponent(): Component {
     stack: '',
     workdir: '',
     stdinMode: 'pipe',
+    termMode: 'pipe',
     envProfile: null,
     commands: [],
     env: {},

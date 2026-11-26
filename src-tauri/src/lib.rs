@@ -120,6 +120,7 @@ pub fn run() {
             commands::run_template,
             commands::send_input_cmd,
             commands::session_log,
+            commands::resize_pty_cmd,
             commands::clear_session_log,
             commands::process_detail,
             commands::export_log,

@@ -54,6 +54,8 @@ export interface Component {
   workdir: string;
   /** 标准输入策略：pipe（可输入）| null（立即 EOF） */
   stdinMode: 'pipe' | 'null';
+  /** 终端模式：pipe（行渲染）| pty（伪终端，可跑 TUI） */
+  termMode: 'pipe' | 'pty';
   /** 引用的环境 id；环境提供基础变量，env 作为覆盖 */
   envProfile: string | null;
   commands: CommandStep[];
@@ -109,6 +111,7 @@ export interface SessionView {
   workdir: string;
   ports: number[];
   projectId: string;
+  termMode: string;
 }
 
 export interface MetricRow {

@@ -66,6 +66,7 @@ function stdoutFix(v: string): 'pipe' | 'null' {
 
 // 环境引用：'' 表示不使用
 const stdinSel = ref<string>(draft.stdinMode ?? 'pipe');
+const termSel = ref<string>(draft.termMode ?? 'pipe');
 const envSel = ref<string>(draft.envProfile ?? '');
 const envProfile = computed(() => state.environments.find((e) => e.id === envSel.value));
 const envProfileVars = computed(() => Object.keys(envProfile.value?.env ?? {}));
@@ -154,6 +155,7 @@ async function submit() {
     draft.health = null;
   }
   draft.stdinMode = stdoutFix(stdinSel.value);
+  draft.termMode = termSel.value === 'pty' ? 'pty' : 'pipe';
   draft.envProfile = envSel.value || null;
   draft.shell =
     shellSel.value === ''
@@ -244,11 +246,18 @@ function drop() {
             <label>端口（逗号分隔）</label>
             <input v-model="portsText" placeholder="8000, 8001" />
           </div>
-          <div class="field">
+          <div v-if="termSel !== 'pty'" class="field">
             <label>标准输入</label>
             <select v-model="stdinSel">
               <option value="pipe">可输入（默认）</option>
               <option value="null">关闭（立即 EOF）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>终端模式</label>
+            <select v-model="termSel">
+              <option value="pipe">管道（默认）</option>
+              <option value="pty">伪终端 · TTY</option>
             </select>
           </div>
           <div class="field">
@@ -269,8 +278,11 @@ function drop() {
         </div>
 
         <span class="hint" style="margin-top: -4px">
-          有些 CLI 会等 stdin 才继续（例如 <code>claude --print</code> 等待提示词）；选「关闭」可让它立刻读到 EOF，
-          也能避免某些工具在管道下端等 3s。
+          <b>伪终端</b>会分配真 TTY（isatty / raw mode / 窗口尺寸），可跑 claude、vim、top 这类交互程序，
+          但 stdout 与 stderr 会合并成一路；<b>管道</b>模式能区分错误行，但 TUI 程序无法工作。
+          <template v-if="termSel !== 'pty'">
+            另外，有些 CLI 会等 stdin 才继续（如 <code>claude --print</code>），把标准输入设为「关闭」可立即 EOF。
+          </template>
         </span>
 
         <div class="section-t">环境</div>

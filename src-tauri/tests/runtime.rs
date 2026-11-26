@@ -27,6 +27,7 @@ fn spec(id: &str, command: &str, health: Option<HealthCheck>) -> SpawnSpec {
         kind: "component".into(),
         project_id: "all".into(),
         stdin_mode: "pipe".into(),
+        term_mode: "pipe".into(),
         steps: vec![CommandStep::new(command, Join::And)],
         command: command.into(),
         workdir: std::env::temp_dir().display().to_string(),
@@ -266,6 +267,29 @@ async fn stop_never_stuck_in_stopping() {
             panic!("停止后一直卡在 {st:?}");
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// PTY 模式：子进程必须看到一个真 TTY（这是跑 TUI / agent CLI 的前提）
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pty_mode_gives_real_tty() {
+    let sink = sink();
+    let state = make_state("pty");
+    let cmd = if cfg!(windows) {
+        "if ([Console]::IsInputRedirected) { 'redirected' } else { 'tty' }"
+    } else {
+        "tty"
+    };
+    let mut s = spec("t-pty", cmd, None);
+    s.term_mode = "pty".into();
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+
+    assert!(wait_status(&state, "t-pty", Status::Stopped, 15000).await);
+    let text = log_text(&state, "t-pty");
+    if cfg!(windows) {
+        assert!(text.contains("tty") && !text.contains("redirected"), "ConPTY 下不应是重定向：{text}");
+    } else {
+        assert!(text.contains("/dev/"), "应输出 pty 设备名：{text}");
     }
 }
 

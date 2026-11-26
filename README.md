@@ -121,7 +121,23 @@ shell 家族决定参数形式（`supervisor::shell_invocation`，有单测覆�
 - **默认 shell**：设置 → 运行 → 默认 shell（下拉，Windows 给 pwsh / powershell / cmd，macOS 给 zsh / bash / sh，也可填自定义路径）。
 - **组件级覆盖**：编辑组件 → 执行 shell，可选「跟随设置」或单独指定；模板同理。
 
-### 3.2 命令链（且 / 或）
+### 3.2 终端模式：管道 / 伪终端
+
+组件可选择**终端模式**：
+
+| 模式 | 实现 | 适用 | 代价 |
+| --- | --- | --- | --- |
+| 管道（默认） | 独立的 stdin/stdout/stderr 管道 | 构建、服务、脚本 | 没有 TTY，TUI 程序跑不了 |
+| 伪终端 | POSIX pty / Windows ConPTY | 交互式 CLI、agent CLI、vim/top 等 TUI | stdout 与 stderr 合并，错误行不再单独标记 |
+
+- 伪终端会话在前端用 **xterm.js** 渲染（解释 ANSI / 光标控制 / 备用屏），按键逐字节转发，
+  窗口尺寸通过 `resize_pty_cmd` 同步给 PTY，所以 `Ctrl+C`、方向键、`Esc` 都按真终端语义工作。
+- 管道模式保留「错误行红色标记」，并能对 `no stdin data received` 这类报错给出提示。
+- 需要 TUI 就在编辑组件里把「终端模式」设为**伪终端 · TTY**。
+
+![伪终端会话](docs/screenshots/pty.png)
+
+## 3.3 命令链（且 / 或）
 
 组件的启动命令是一个**有序步骤列表**，步骤之间用「且 / 或」连接（`CommandStep { cmd, join }`）：
 

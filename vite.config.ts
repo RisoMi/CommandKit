@@ -16,5 +16,13 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+    // xterm 体积较大，单独切一个 chunk，主包保持轻量
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          xterm: ['@xterm/xterm', '@xterm/addon-fit'],
+        },
+      },
+    },
   },
 });

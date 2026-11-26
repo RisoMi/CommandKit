@@ -7,9 +7,8 @@
 //! - 单条操作只影响自己的会话，批量操作按 dependsOn 拓扑序编排。
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::{ExitStatus, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -38,6 +37,8 @@ impl EventSink for NullSink {
     fn emit_event(&self, _event: &str, _payload: serde_json::Value) {}
 }
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use std::io::{Read, Write};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
@@ -57,6 +58,8 @@ pub struct SpawnSpec {
     pub project_id: String,
     /// 标准输入策略
     pub stdin_mode: String,
+    /// 终端模式："pipe"（管道，行渲染）| "pty"（伪终端，可跑 TUI）
+    pub term_mode: String,
     /// 命令链（按顺序执行，join 决定衔接方式）
     pub steps: Vec<CommandStep>,
     /// 展示用：把命令链拼成一行
@@ -91,6 +94,10 @@ pub struct Inner {
     pub log_bytes: usize,
     pub seq: u64,
     pub stdin: Option<mpsc::UnboundedSender<String>>,
+    /// PTY 会话的原始写入通道（每个按键都要转发，不能按行）
+    pub pty_stdin: Option<std::sync::mpsc::Sender<String>>,
+    /// 保留 master 句柄用于 resize
+    pub pty_master: Option<Box<dyn MasterPty + Send>>,
     pub log_file: Option<std::fs::File>,
     /// 崩溃自动重启：由 tick 任务拉起，避免 start ⇄ finish 递归 await 造成非 Send
     pub restart_pending: bool,
@@ -113,6 +120,8 @@ impl Inner {
             log_bytes: 0,
             seq: 0,
             stdin: None,
+            pty_stdin: None,
+            pty_master: None,
             log_file: None,
             restart_pending: false,
         }
@@ -148,6 +157,7 @@ impl Session {
             workdir: spec.workdir,
             ports: spec.ports,
             project_id: spec.project_id,
+            term_mode: spec.term_mode.clone(),
         }
     }
 
@@ -238,6 +248,11 @@ pub fn spec_from_component(c: &Component, envs: &[Environment]) -> SpawnSpec {
         } else {
             c.stdin_mode.clone()
         },
+        term_mode: if c.term_mode.is_empty() {
+            "pipe".into()
+        } else {
+            c.term_mode.clone()
+        },
         command: display_chain(&c.commands),
         steps: c.commands.clone(),
         workdir: c.workdir.clone(),
@@ -269,6 +284,7 @@ pub fn spec_from_template(t: &Template, shell: String) -> SpawnSpec {
         kind: "template".into(),
         project_id: "template".into(),
         stdin_mode: "pipe".into(),
+        term_mode: "pipe".into(),
         steps,
         command,
         workdir: t.workdir.clone(),
@@ -703,16 +719,190 @@ fn is_terminal_step(steps: &[CommandStep], i: usize) -> bool {
     next_after_success(steps, i).is_none()
 }
 
+/// 一步的实际子进程：管道 or 伪终端
+enum StepWaiter {
+    Plain(Child),
+    Pty(Box<dyn portable_pty::Child + Send + Sync>),
+}
+
+/// 一步的退出结果（管道 / PTY 统一形状）
+#[derive(Debug, Clone)]
+pub struct Outcome {
+    pub code: Option<i32>,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+impl StepWaiter {
+    fn pid(&self) -> Option<u32> {
+        match self {
+            StepWaiter::Plain(c) => c.id(),
+            StepWaiter::Pty(c) => c.process_id(),
+        }
+    }
+
+    async fn wait(self) -> Outcome {
+        match self {
+            StepWaiter::Plain(mut c) => match c.wait().await {
+                Ok(st) => Outcome {
+                    code: st.code(),
+                    success: st.success(),
+                    error: None,
+                },
+                Err(e) => Outcome {
+                    code: None,
+                    success: false,
+                    error: Some(e.to_string()),
+                },
+            },
+            StepWaiter::Pty(mut c) => {
+                // portable-pty 的 wait 是阻塞的，丢到阻塞线程池
+                match tokio::task::spawn_blocking(move || c.wait()).await {
+                    Ok(Ok(st)) => Outcome {
+                        code: Some(st.exit_code() as i32),
+                        success: st.success(),
+                        error: None,
+                    },
+                    Ok(Err(e)) => Outcome {
+                        code: None,
+                        success: false,
+                        error: Some(e.to_string()),
+                    },
+                    Err(e) => Outcome {
+                        code: None,
+                        success: false,
+                        error: Some(e.to_string()),
+                    },
+                }
+            }
+        }
+    }
+}
+
+fn pty_builder(spec: &SpawnSpec, shell: &str, command: &str) -> Result<CommandBuilder, String> {
+    // 复用管道模式的前置校验（命令为空 / 工作目录不存在）
+    build_command(spec, shell, command)?;
+    let mut cmd = CommandBuilder::new(shell);
+    for arg in shell_invocation(shell, command) {
+        cmd.arg(arg);
+    }
+    cmd.cwd(spec.workdir.trim());
+    for (k, v) in &spec.env {
+        if k.trim().is_empty() {
+            continue;
+        }
+        cmd.env(normalize_key(k.trim()), expand(v, &spec.env));
+    }
+    Ok(cmd)
+}
+
+/// 打开伪终端并启动 shell；失败时按需回退 powershell.exe
+fn spawn_pty(
+    sink: &Arc<dyn EventSink>,
+    session: &Arc<Session>,
+    spec: &SpawnSpec,
+    shell: &str,
+    command: &str,
+) -> Result<(StepWaiter, Option<Box<dyn MasterPty + Send>>), String> {
+    let attempt = |sh: &str| -> Result<(StepWaiter, Box<dyn MasterPty + Send>), String> {
+        let pty_cmd = pty_builder(spec, sh, command)?;
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 32,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("创建伪终端失败：{e}"))?;
+        let child = pair
+            .slave
+            .spawn_command(pty_cmd)
+            .map_err(|e| format!("启动失败：{e}"))?;
+        drop(pair.slave);
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("读取伪终端失败：{e}"))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("写入伪终端失败：{e}"))?;
+        let master = pair.master;
+
+        // 读线程：PTY 把 stdout/stderr 合并成一路，全部按 out 处理
+        {
+            let sink2 = sink.clone();
+            let session2 = session.clone();
+            std::thread::spawn(move || {
+                let mut reader = reader;
+                let mut decoder = Decoder::new();
+                let mut buf = [0u8; 8192];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let text = decoder.push(&buf[..n]);
+                            if !text.is_empty() {
+                                push_chunk(&sink2, &session2, &text, "out");
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        // 写线程：终端里每敲一个键都直接写进 pty（TUI 需要逐字节）
+        {
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            session.inner.lock().unwrap().pty_stdin = Some(tx);
+            std::thread::spawn(move || {
+                let mut writer = writer;
+                while let Ok(data) = rx.recv() {
+                    if writer.write_all(data.as_bytes()).is_err() {
+                        break;
+                    }
+                    let _ = writer.flush();
+                }
+            });
+        }
+
+        Ok((StepWaiter::Pty(child), master))
+    };
+
+    match attempt(shell) {
+        Ok((waiter, master)) => Ok((waiter, Some(master))),
+        Err(e) => {
+            if cfg!(windows) && matches!(shell_kind(shell), ShellKind::Pwsh) {
+                if let Ok((waiter, master)) = attempt("powershell.exe") {
+                    push_chunk(
+                        sink,
+                        session,
+                        "\u{1b}[33m# 未找到 pwsh.exe，已回退 windows powershell\u{1b}[0m\n",
+                        "err",
+                    );
+                    return Ok((waiter, Some(master)));
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
 fn spawn_step(
     sink: &Arc<dyn EventSink>,
     session: &Arc<Session>,
     spec: &SpawnSpec,
     shell: &str,
     command: &str,
-) -> Result<Child, String> {
+) -> Result<(StepWaiter, Option<Box<dyn MasterPty + Send>>), String> {
+    if spec.term_mode == "pty" {
+        return spawn_pty(sink, session, spec, shell, command);
+    }
+
     let mut cmd = build_command(spec, shell, command)?;
-    match cmd.spawn() {
-        Ok(c) => Ok(c),
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
         Err(e) => {
             // Win10 常见：只有 Windows PowerShell，没有 pwsh 7 —— 自动回退一次
             if cfg!(windows) && matches!(shell_kind(shell), ShellKind::Pwsh) {
@@ -724,13 +914,34 @@ fn spawn_step(
                             "\u{1b}[33m# 未找到 pwsh.exe，已回退 windows powershell\u{1b}[0m\n",
                             "err",
                         );
-                        return Ok(c);
+                        return Ok((StepWaiter::Plain(c), None));
                     }
                 }
             }
-            Err(format!("启动失败：{e}"))
+            return Err(format!("启动失败：{e}"));
         }
+    };
+
+    if let Some(mut sin) = child.stdin.take() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        session.inner.lock().unwrap().stdin = Some(tx);
+        tokio::spawn(async move {
+            while let Some(line) = rx.recv().await {
+                if sin.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+                let _ = sin.flush().await;
+            }
+        });
     }
+    if let Some(out) = child.stdout.take() {
+        tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
+    }
+    if let Some(err) = child.stderr.take() {
+        tokio::spawn(pump(sink.clone(), session.clone(), err, "err"));
+    }
+
+    Ok((StepWaiter::Plain(child), None))
 }
 
 /// 逐条执行命令链，全部结束后统一收敛会话状态
@@ -743,7 +954,11 @@ async fn run_chain(
 ) {
     let steps = spec.steps.clone();
     let mut idx = 0usize;
-    let mut status: std::io::Result<ExitStatus> = Err(std::io::Error::other("命令链没有执行"));
+    let mut outcome = Outcome {
+        code: None,
+        success: false,
+        error: Some("命令链没有执行".into()),
+    };
 
     loop {
         if session.inner.lock().unwrap().stopping {
@@ -772,8 +987,8 @@ async fn run_chain(
             );
         }
 
-        let mut child = match spawn_step(&sink, &session, &spec, &shell, &step.cmd) {
-            Ok(c) => c,
+        let (waiter, master) = match spawn_step(&sink, &session, &spec, &shell, &step.cmd) {
+            Ok(v) => v,
             Err(e) => {
                 {
                     let mut inner = session.inner.lock().unwrap();
@@ -788,10 +1003,11 @@ async fn run_chain(
             }
         };
 
-        let pid = child.id();
+        let pid = waiter.pid();
         let spawn_ms = {
             let mut inner = session.inner.lock().unwrap();
             inner.pid = pid;
+            inner.pty_master = master;
             inner
                 .started_instant
                 .map(|t| t.elapsed().as_millis())
@@ -809,18 +1025,6 @@ async fn run_chain(
             );
         }
 
-        if let Some(mut sin) = child.stdin.take() {
-            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-            session.inner.lock().unwrap().stdin = Some(tx);
-            tokio::spawn(async move {
-                while let Some(line) = rx.recv().await {
-                    if sin.write_all(line.as_bytes()).await.is_err() {
-                        break;
-                    }
-                    let _ = sin.flush().await;
-                }
-            });
-        }
         // 15s 一条输出都没有 → 给出可操作的提示，避免用户以为「卡死没反应」
         {
             let seq_at_spawn = session.inner.lock().unwrap().seq;
@@ -848,13 +1052,6 @@ async fn run_chain(
             });
         }
 
-        if let Some(out) = child.stdout.take() {
-            tokio::spawn(pump(sink.clone(), session.clone(), out, "out"));
-        }
-        if let Some(err) = child.stderr.take() {
-            tokio::spawn(pump(sink.clone(), session.clone(), err, "err"));
-        }
-
         // 只有最后一条主线命令才挂健康检查 / 置为运行中
         if is_terminal_step(&steps, idx) {
             match spec.health.clone() {
@@ -873,17 +1070,18 @@ async fn run_chain(
             }
         }
 
-        status = child.wait().await;
-        let ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
+        outcome = waiter.wait().await;
+        let ok = outcome.success;
 
         {
             let mut inner = session.inner.lock().unwrap();
             inner.pid = None;
             inner.stdin = None;
+            inner.pty_stdin = None;
+            inner.pty_master = None;
         }
 
         if steps.len() > 1 {
-            let code = status.as_ref().ok().and_then(|s| s.code());
             push_chunk(
                 &sink,
                 &session,
@@ -891,7 +1089,9 @@ async fn run_chain(
                     "\u{1b}[90m# 步骤 {}/{} 结束（{}）\u{1b}[0m\n",
                     idx + 1,
                     steps.len(),
-                    code.map(|c| format!("退出码 {c}"))
+                    outcome
+                        .code
+                        .map(|c| format!("退出码 {c}"))
                         .unwrap_or_else(|| "无退出码".into())
                 ),
                 "out",
@@ -911,7 +1111,7 @@ async fn run_chain(
         }
     }
 
-    finish(&sink, &state, &session, status).await;
+    finish(&sink, &state, &session, outcome).await;
 }
 
 fn watch_health(sink: Arc<dyn EventSink>, session: Arc<Session>, hc: HealthCheck) {
@@ -1034,7 +1234,7 @@ async fn finish(
     sink: &Arc<dyn EventSink>,
     state: &Arc<AppState>,
     session: &Arc<Session>,
-    status: std::io::Result<std::process::ExitStatus>,
+    outcome: Outcome,
 ) {
     let _ = &state;
     let mut restart = false;
@@ -1047,39 +1247,35 @@ async fn finish(
         let prior_error = inner.error.clone();
         inner.pid = None;
         inner.stdin = None;
+        inner.pty_stdin = None;
+        inner.pty_master = None;
         inner.health_ok = false;
         inner.log_file = None;
         inner.started_instant = None;
         // 冻结运行时长：结束后不再随时钟增长
         inner.ended_at = Some(store::now_ms());
-        match status {
-            Ok(st) => {
-                let code = st.code();
-                inner.exit_code = code;
-                if was_stopping {
-                    inner.status = Status::Stopped;
-                    inner.error = None;
-                } else if st.success() {
-                    inner.status = Status::Stopped;
-                    inner.error = None;
-                } else {
-                    inner.status = Status::Failed;
-                    inner.error = Some(prior_error.unwrap_or_else(|| {
-                        format!(
-                            "进程异常退出（{}）",
-                            code.map(|c| format!("退出码 {c}"))
-                                .unwrap_or_else(|| "被信号终止".into())
-                        )
-                    }));
-                    if spec.policy.restart_on_crash && inner.restarts < spec.policy.max_restarts {
-                        inner.restarts += 1;
-                        restart = true;
-                    }
-                }
-            }
-            Err(e) => {
-                inner.status = Status::Failed;
-                inner.error = Some(prior_error.unwrap_or_else(|| format!("等待进程失败：{e}")));
+
+        inner.exit_code = outcome.code;
+        if let Some(e) = outcome.error.clone() {
+            inner.status = Status::Failed;
+            inner.error = Some(prior_error.unwrap_or_else(|| format!("等待进程失败：{e}")));
+        } else if was_stopping || outcome.success {
+            inner.status = Status::Stopped;
+            inner.error = None;
+        } else {
+            inner.status = Status::Failed;
+            inner.error = Some(prior_error.unwrap_or_else(|| {
+                format!(
+                    "进程异常退出（{}）",
+                    outcome
+                        .code
+                        .map(|c| format!("退出码 {c}"))
+                        .unwrap_or_else(|| "被信号终止".into())
+                )
+            }));
+            if spec.policy.restart_on_crash && inner.restarts < spec.policy.max_restarts {
+                inner.restarts += 1;
+                restart = true;
             }
         }
         let code = inner.exit_code;
@@ -1315,12 +1511,41 @@ pub fn send_input(state: &Arc<AppState>, id: &str, data: &str) -> Result<(), Str
         sessions.get(id).cloned()
     }
     .ok_or_else(|| format!("会话不存在：{id}"))?;
-    let tx = session.inner.lock().unwrap().stdin.clone();
-    match tx {
+    let (pty_tx, line_tx) = {
+        let inner = session.inner.lock().unwrap();
+        (inner.pty_stdin.clone(), inner.stdin.clone())
+    };
+    // PTY 会话必须逐字节转发（TUI 的按键、方向键、Ctrl 组合）
+    if let Some(tx) = pty_tx {
+        return tx
+            .send(data.to_string())
+            .map_err(|_| "伪终端输入通道已关闭".to_string());
+    }
+    match line_tx {
         Some(tx) => tx
             .send(data.to_string())
             .map_err(|_| "输入通道已关闭".to_string()),
         None => Err("该会话没有可写 stdin".into()),
+    }
+}
+
+/// 调整伪终端尺寸（TUI 需要正确的行列数）
+pub fn resize_pty(state: &Arc<AppState>, id: &str, cols: u16, rows: u16) -> Result<(), String> {
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(id).cloned()
+    }
+    .ok_or_else(|| format!("会话不存在：{id}"))?;
+    let size = PtySize {
+        rows: rows.max(5),
+        cols: cols.max(20),
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+    let inner = session.inner.lock().unwrap();
+    match inner.pty_master.as_ref() {
+        Some(m) => m.resize(size).map_err(|e| format!("调整窗口失败：{e}")),
+        None => Err("该会话不是伪终端".into()),
     }
 }
 

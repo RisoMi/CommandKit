@@ -62,6 +62,7 @@ function mkComponent(p: Partial<Component> & { id: string; name: string }): Comp
     stack: '',
     workdir: '',
     stdinMode: 'pipe',
+    termMode: 'pipe',
     envProfile: null,
     commands: [],
     env: {},
@@ -108,6 +109,7 @@ const components: Component[] = [
     id: 'web-app',
     name: 'web-app',
     projectId: 'frontend',
+    termMode: 'pipe',
     stack: 'npm dev',
     workdir: '~/work/web-app',
     commands: [{ cmd: 'npm run dev -- --port 5173', join: 'and' }],
@@ -118,6 +120,7 @@ const components: Component[] = [
     id: 'admin-console',
     name: 'admin-console',
     projectId: 'frontend',
+    termMode: 'pipe',
     stack: 'vite',
     workdir: '~/work/admin-console',
     commands: [{ cmd: 'npm run dev -- --port 5174', join: 'and' }],
@@ -128,6 +131,7 @@ const components: Component[] = [
     id: 'api-service',
     name: 'api-service',
     projectId: 'backend',
+    termMode: 'pty',
     stack: 'Python 3.11',
     workdir: '~/work/api-service',
     commands: [{ cmd: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000', join: 'and' }],
@@ -145,6 +149,7 @@ const components: Component[] = [
     id: 'report-service',
     name: 'report-service',
     projectId: 'backend',
+    termMode: 'pipe',
     stack: 'Spring Boot',
     workdir: '~/work/report-service',
     commands: [{ cmd: './gradlew bootRun --args=--server.port=8080', join: 'and' }],
@@ -155,6 +160,7 @@ const components: Component[] = [
     id: 'redis-local',
     name: 'redis-local',
     projectId: 'middleware',
+    termMode: 'pipe',
     stack: 'Redis 7',
     workdir: '~/Tools/redis',
     commands: [{ cmd: 'redis-server --port 6379 --save ""', join: 'and' }],
@@ -164,6 +170,7 @@ const components: Component[] = [
     id: 'postgres-local',
     name: 'postgres-local',
     projectId: 'data',
+    termMode: 'pipe',
     stack: 'PostgreSQL',
     workdir: '~/Tools/pgsql',
     commands: [{ cmd: 'pg_ctl -D ./data start', join: 'and' }],
@@ -227,6 +234,7 @@ const sessions: Record<string, SessionView> = {
     workdir: '~/work/web-app',
     ports: [5173],
     projectId: 'frontend',
+    termMode: 'pipe',
   },
   'admin-console': {
     id: 'admin-console',
@@ -244,6 +252,7 @@ const sessions: Record<string, SessionView> = {
     workdir: '~/work/admin-console',
     ports: [5174],
     projectId: 'frontend',
+    termMode: 'pipe',
   },
   'api-service': {
     id: 'api-service',
@@ -257,10 +266,11 @@ const sessions: Record<string, SessionView> = {
     error: null,
     restarts: 0,
     healthOk: true,
-    command: 'py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000',
+    command: 'uvicorn main:app --port 8000',
     workdir: '~/work/api-service',
     ports: [8000],
     projectId: 'backend',
+    termMode: 'pty',
   },
   'report-service': {
     id: 'report-service',
@@ -278,6 +288,7 @@ const sessions: Record<string, SessionView> = {
     workdir: '~/work/report-service',
     ports: [8080],
     projectId: 'backend',
+    termMode: 'pipe',
   },
   'redis-local': {
     id: 'redis-local',
@@ -295,6 +306,7 @@ const sessions: Record<string, SessionView> = {
     workdir: '~/Tools/redis',
     ports: [6379],
     projectId: 'middleware',
+    termMode: 'pipe',
   },
   'postgres-local': {
     id: 'postgres-local',
@@ -312,6 +324,7 @@ const sessions: Record<string, SessionView> = {
     workdir: '~/Tools/pgsql',
     ports: [5432],
     projectId: 'data',
+    termMode: 'pipe',
   },
 };
 
@@ -326,15 +339,15 @@ const metrics: Record<string, MetricRow> = {
 
 const logs: Record<string, LogChunk[]> = {
   'api-service': [
-    { seq: 1, stream: 'out', data: '\x1b[90m# 独立会话 · cwd=~/work/api-service · env 由 Rust 注入\x1b[0m\n' },
-    { seq: 2, stream: 'out', data: '\x1b[32m$\x1b[0m py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000\n' },
-    { seq: 3, stream: 'out', data: '\x1b[90m[13:02:41] INFO  Loaded env: PYTHON_HOME, OLLAMA_HOST, JWT_SECRET\x1b[0m\n' },
-    { seq: 4, stream: 'out', data: '\x1b[90m[13:02:42] INFO  Connecting redis://127.0.0.1:6379 ... \x1b[0m\x1b[32mok\x1b[0m\n' },
-    { seq: 5, stream: 'out', data: '\x1b[90m[13:02:43] INFO  LangGraph graph compiled: 7 nodes, 9 edges\x1b[0m\n' },
-    { seq: 6, stream: 'out', data: '\x1b[32m[13:02:44] INFO  Application startup complete.\x1b[0m\n' },
-    { seq: 7, stream: 'out', data: '\x1b[33m[13:03:10] WARN 上游 report-service 健康检查重试 1/3\x1b[0m\n' },
-    { seq: 8, stream: 'out', data: '\x1b[32m[13:03:12] INFO  Upstream ready, health check passed\x1b[0m\n' },
-    { seq: 9, stream: 'out', data: '\x1b[90m[13:04:02] INFO  127.0.0.1:51234 - "GET /health 200 OK"\x1b[0m\n' },
+    { seq: 1, stream: 'out', data: '\x1b[90m# PTY 会话 · cwd=~/work/api-service\x1b[0m\r\n' },
+    { seq: 2, stream: 'out', data: '\x1b[32m$\x1b[0m uvicorn main:app --port 8000\r\n' },
+    { seq: 3, stream: 'out', data: '\x1b[36mINFO\x1b[0m  Loaded env: PYTHON_HOME, OLLAMA_HOST\r\n' },
+    { seq: 4, stream: 'out', data: '\x1b[36mINFO\x1b[0m  Redis 127.0.0.1:6379 ... \x1b[32mok\x1b[0m\r\n' },
+    { seq: 5, stream: 'out', data: '\x1b[36mINFO\x1b[0m  Graph compiled: 7 nodes, 9 edges\r\n' },
+    { seq: 6, stream: 'out', data: '\x1b[32mINFO\x1b[0m  Startup complete\r\n' },
+    { seq: 7, stream: 'out', data: '\x1b[33mWARN\x1b[0m  upstream report-service retry 1/3\r\n' },
+    { seq: 8, stream: 'out', data: '\x1b[32mINFO\x1b[0m  Upstream ready\x1b[0m\r\n' },
+    { seq: 9, stream: 'out', data: '\x1b[90mINFO\x1b[0m  GET /health \x1b[32m200 OK\x1b[0m\r\n' },
   ],
   'web-app': [],
 
@@ -346,7 +359,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.3.3',
+      version: '1.4.0',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -565,6 +578,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         stack: 'imported',
         workdir: '~/work/imported',
         stdinMode: 'pipe',
+        termMode: 'pipe',
         envProfile: null,
         commands: [{ cmd: 'echo imported', join: 'and' }],
         env: {},
@@ -599,6 +613,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         workdir: t.workdir,
         ports: [],
         projectId: 'template',
+    termMode: 'pipe',
       };
       emit('ck:session', sessions[id]);
       pushLog(id, `\x1b[32m$\x1b[0m ${sessions[id].command}\n`);

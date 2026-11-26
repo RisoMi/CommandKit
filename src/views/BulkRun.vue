@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
+import PtyTerminal from '../components/PtyTerminal.vue';
 import Terminal from '../components/Terminal.vue';
 import { api } from '../api';
 import { copyText } from '../clipboard';
@@ -221,14 +222,18 @@ async function openExternal() {
             </span>
             <span class="mono muted cmdcwd">{{ cwdText }}</span>
             <span class="pill" :class="activeSession?.status">{{ statusText(activeSession?.status ?? 'stopped') }}</span>
-            <span class="muted" style="font-size: 10px">可选中复制</span>
+            <span v-if="activeSession?.termMode === 'pty'" class="muted" style="font-size: 10px">
+              点击终端直接输入 · Ctrl+C 生效
+            </span>
+            <span v-else class="muted" style="font-size: 10px">可选中复制</span>
             <span v-if="state.metrics[active ?? '']" class="mono muted">
               CPU {{ (state.metrics[active ?? ''].cpu).toFixed(1) }}% ·
               {{ fmtMem(state.metrics[active ?? ''].mem) }}
             </span>
           </div>
 
-          <Terminal :id="active ?? ''" :empty-hint="emptyHint" />
+          <PtyTerminal v-if="activeSession?.termMode === 'pty'" :id="active ?? ''" />
+          <Terminal v-else :id="active ?? ''" :empty-hint="emptyHint" />
 
           <div class="flex wrap" style="margin-top: 8px">
             <button class="btn sm" :disabled="!active" @click="active && restartComponent(active)">重启当前</button>

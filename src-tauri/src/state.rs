@@ -119,6 +119,7 @@ impl LegacyComponent {
             workdir: self.workdir,
             env_profile: None,
             stdin_mode: "pipe".into(),
+            term_mode: "pipe".into(),
             commands: if self.command.trim().is_empty() {
                 Vec::new()
             } else {
@@ -276,6 +277,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             workdir: home_str.clone(),
             env_profile: None,
             stdin_mode: "pipe".into(),
+            term_mode: "pipe".into(),
             commands: vec![CommandStep::new(
                 if cfg!(windows) {
                     "node -v; npm -v; $PSVersionTable.PSVersion"
@@ -301,6 +303,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             workdir: home_str.clone(),
             env_profile: None,
             stdin_mode: "pipe".into(),
+            term_mode: "pipe".into(),
             commands: vec![CommandStep::new(&server_cmd, Join::And)],
             env: Default::default(),
             ports: vec![8899],
@@ -323,6 +326,7 @@ fn seed_components(root: &std::path::Path) -> Vec<Component> {
             workdir: home_str,
             env_profile: None,
             stdin_mode: "pipe".into(),
+            term_mode: "pipe".into(),
             commands: vec![CommandStep::new(&tick_cmd, Join::And)],
             env: Default::default(),
             ports: vec![],

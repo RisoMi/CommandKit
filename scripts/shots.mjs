@@ -106,6 +106,19 @@ if (!clip.includes('web-app') || clip.includes('\u001b[')) {
 }
 await page.screenshot({ path: join(OUT, '03b-term-switch.png') });
 
+// PTY 会话：后端项目下 api-service 是伪终端，必须由 xterm 渲染
+await page.locator('.side-session', { hasText: '后端' }).first().click();
+await page.waitForTimeout(400);
+await page.locator('.tab', { hasText: 'api-service' }).first().click();
+await page.waitForTimeout(700);
+if (!(await page.locator('.xterm').count())) {
+  throw new Error('PTY 会话没有用 xterm 渲染');
+}
+await page.screenshot({ path: join(OUT, '03c-pty.png') });
+// 回到前端分组，后续断言基于 web-app
+await page.locator('.side-session', { hasText: '前端' }).first().click();
+await page.waitForTimeout(300);
+
 // 进程监管
 await page.getByText('进程监管', { exact: true }).first().click();
 await page.waitForTimeout(900);

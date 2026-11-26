@@ -17,6 +17,7 @@ fn project(id: &str, deps: &[&str]) -> Component {
         workdir: std::env::temp_dir().display().to_string(),
         env_profile: None,
         stdin_mode: "pipe".into(),
+        term_mode: "pipe".into(),
         commands: vec![CommandStep::new("echo ok", Join::And)],
         env: Default::default(),
         ports: vec![],

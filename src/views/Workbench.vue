@@ -49,6 +49,7 @@ function useTemplate(t: Template) {
     stack: t.platform,
     workdir: t.workdir,
     stdinMode: 'pipe',
+    termMode: 'pipe',
     envProfile: null,
     commands: t.commands
       .filter((c) => c.cmd.trim())

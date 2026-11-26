@@ -47,6 +47,8 @@ export const api = {
 
   sendInput: (id: string, data: string) => invoke<void>('send_input_cmd', { id, data }),
   sessionLog: (id: string) => invoke<LogChunk[]>('session_log', { id }),
+  resizePty: (id: string, cols: number, rows: number) =>
+    invoke<void>('resize_pty_cmd', { id, cols, rows }),
   clearLog: (id: string) => invoke<void>('clear_session_log', { id }),
 
   processDetail: (id: string) => invoke<ProcessDetail>('process_detail', { id }),

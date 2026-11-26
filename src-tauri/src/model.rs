@@ -9,6 +9,10 @@ fn default_stdin_mode() -> String {
     "pipe".to_string()
 }
 
+fn default_term_mode() -> String {
+    "pipe".to_string()
+}
+
 fn default_project_id() -> String {
     "all".to_string()
 }
@@ -67,6 +71,9 @@ pub struct Component {
     /// 标准输入策略："pipe"（默认，可在终端里输入）| "null"（立即 EOF）
     #[serde(default = "default_stdin_mode")]
     pub stdin_mode: String,
+    /// 终端模式："pipe"（默认，行渲染）| "pty"（伪终端，可跑 TUI / 交互式 CLI）
+    #[serde(default = "default_term_mode")]
+    pub term_mode: String,
     /// 引用的环境 id（环境提供基础变量，下面的 env 作为覆盖）
     #[serde(default)]
     pub env_profile: Option<String>,
@@ -312,6 +319,8 @@ pub struct SessionView {
     pub workdir: String,
     pub ports: Vec<u16>,
     pub project_id: String,
+    /// 该会话是否为伪终端（前端据此选渲染器）
+    pub term_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
