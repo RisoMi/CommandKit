@@ -26,6 +26,7 @@ fn spec(id: &str, command: &str, health: Option<HealthCheck>) -> SpawnSpec {
         name: id.into(),
         kind: "component".into(),
         project_id: "all".into(),
+        stdin_mode: "pipe".into(),
         steps: vec![CommandStep::new(command, Join::And)],
         command: command.into(),
         workdir: std::env::temp_dir().display().to_string(),
@@ -266,6 +267,47 @@ async fn stop_never_stuck_in_stopping() {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// 标准输入关闭：读 stdin 的命令必须立刻拿到 EOF，而不是一直等
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn null_stdin_returns_eof_immediately() {
+    let sink = sink();
+    let state = make_state("stdin-null");
+    let cmd = if cfg!(windows) {
+        "$x = [Console]::In.ReadLine(); Write-Output \"got:$x\""
+    } else {
+        "read line; echo \"got:$line\""
+    };
+    let mut s = spec("t-eof", cmd, None);
+    s.stdin_mode = "null".into();
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+
+    assert!(
+        wait_status(&state, "t-eof", Status::Stopped, 8000).await,
+        "关闭 stdin 后命令应立即读到 EOF 并结束"
+    );
+    let text = log_text(&state, "t-eof");
+    assert!(text.contains("got:"), "读到 EOF 后应继续执行：{text}");
+}
+
+/// 命中已知报错时，终端里要能看到那条可操作提示
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn known_cli_failure_gets_actionable_hint() {
+    let sink = sink();
+    let state = make_state("hint");
+    let cmd = if cfg!(windows) {
+        "Write-Error 'Error: Input must be provided either through stdin or as a prompt argument when using --print'; exit 1"
+    } else {
+        "echo 'Error: Input must be provided either through stdin or as a prompt argument when using --print' 1>&2; exit 1"
+    };
+    let s = spec("t-hint", cmd, None);
+    supervisor::start(sink, state.clone(), s).await.unwrap();
+    assert!(wait_status(&state, "t-hint", Status::Failed, 12000).await);
+
+    let text = log_text(&state, "t-hint");
+    assert!(text.contains("提示："), "应追加可操作提示：{text}");
+    assert!(text.contains("打开外部终端"), "提示里要给出出路：{text}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

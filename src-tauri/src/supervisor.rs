@@ -55,6 +55,8 @@ pub struct SpawnSpec {
     pub kind: String,
     /// 所属项目 id
     pub project_id: String,
+    /// 标准输入策略
+    pub stdin_mode: String,
     /// 命令链（按顺序执行，join 决定衔接方式）
     pub steps: Vec<CommandStep>,
     /// 展示用：把命令链拼成一行
@@ -154,6 +156,29 @@ impl Session {
     }
 }
 
+/// 失败原因里能识别的常见坑，返回一句可操作的提示
+pub fn failure_hint(tail: &str) -> Option<&'static str> {
+    let t = tail.to_ascii_lowercase();
+    if t.contains("no stdin data received")
+        || t.contains("input must be provided")
+        || t.contains("not a tty")
+        || t.contains("raw mode is not supported")
+        || t.contains("inappropriate ioctl")
+    {
+        return Some(
+            "# 提示：这行命令在等交互式输入，而 CommandKit 的会话是管道（不是 TTY）。\n\
+#   · 非交互用法：参数写全，例如 claude -p \"你的问题\"\n\
+#   · 需要真终端 / TUI：点下方「打开外部终端」，或把组件的「标准输入」设为「关闭（EOF）」",
+        );
+    }
+    if t.contains("--print") {
+        return Some(
+            "# 提示：--print 模式必须带提示词（如 claude -p \"你的问题\"），否则它会一直等 stdin",
+        );
+    }
+    None
+}
+
 fn emit_session(sink: &Arc<dyn EventSink>, s: &Session) {
     sink.emit_event(
         "ck:session",
@@ -208,6 +233,11 @@ pub fn spec_from_component(c: &Component, envs: &[Environment]) -> SpawnSpec {
         name: c.name.clone(),
         kind: "component".into(),
         project_id: c.project_id.clone(),
+        stdin_mode: if c.stdin_mode.is_empty() {
+            "pipe".into()
+        } else {
+            c.stdin_mode.clone()
+        },
         command: display_chain(&c.commands),
         steps: c.commands.clone(),
         workdir: c.workdir.clone(),
@@ -238,6 +268,7 @@ pub fn spec_from_template(t: &Template, shell: String) -> SpawnSpec {
         name: format!("模板 · {}", t.name),
         kind: "template".into(),
         project_id: "template".into(),
+        stdin_mode: "pipe".into(),
         steps,
         command,
         workdir: t.workdir.clone(),
@@ -417,7 +448,13 @@ fn build_command(spec: &SpawnSpec, shell: &str, command: &str) -> Result<Command
         cmd.arg(arg);
     }
     cmd.current_dir(&workdir);
-    cmd.stdin(Stdio::piped())
+    // null：立刻 EOF（CLI 不会等 3s 数据）；pipe：可在终端里手动输入
+    let stdin = if spec.stdin_mode == "null" {
+        Stdio::null()
+    } else {
+        Stdio::piped()
+    };
+    cmd.stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1046,7 +1083,25 @@ async fn finish(
             }
         }
         let code = inner.exit_code;
+        let bad = matches!(inner.status, Status::Failed)
+            || code.map(|c| c != 0).unwrap_or(false);
+        // 取日志尾部用于识别「需要 TTY / 缺提示词」这类失败
+        let tail = if bad {
+            let mut acc = String::new();
+            for chunk in inner.log.iter().rev() {
+                acc.insert_str(0, &chunk.data);
+                if acc.len() > 2000 {
+                    break;
+                }
+            }
+            acc
+        } else {
+            String::new()
+        };
         drop(inner);
+        if let Some(hint) = failure_hint(&tail) {
+            push_chunk(sink, session, &format!("\u{1b}[33m{hint}\u{1b}[0m\n"), "err");
+        }
         push_chunk(
             sink,
             session,

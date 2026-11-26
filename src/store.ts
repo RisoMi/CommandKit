@@ -495,6 +495,7 @@ export function newComponent(): Component {
     projectId: pid,
     stack: '',
     workdir: '',
+    stdinMode: 'pipe',
     envProfile: null,
     commands: [],
     env: {},

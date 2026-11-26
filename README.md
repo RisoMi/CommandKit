@@ -144,7 +144,22 @@ Windows 上 `pwsh.exe` 不存在时会自动回退 `powershell.exe` 并在终端
   值支持 `%PATH%` / `$PATH` / `${VAR}` 引用（先展开项目内互相引用，再展开宿主环境）。
 - Windows 下 `PATH` 键统一规整为 `Path`，避免大小写重复。
 
-### 3.2 输出流转发
+### 3.3 标准输入与「需要 TTY」的 CLI
+
+CommandKit 的会话用**管道**接管 stdin/stdout/stderr，**不是 TTY**。因此：
+
+- 默认「标准输入」= 可输入：能在终端底部的输入框里给子进程喂内容。
+- 组件可把「标准输入」设为**关闭（EOF）**：子进程立刻读到 EOF，适合那些「等不到 stdin 要干等 3 秒」的 CLI。
+- **交互式 TUI 程序（agent CLI 的交互模式、vim、top 等）在这种会话里无法正常工作** —— 它们要 `isatty` / raw mode。此时请用卡片上的「打开外部终端」在真终端里跑。
+- 常见报错会被识别并在终端里追加一条可操作提示：
+
+| 终端报错 | 含义 | 怎么解决 |
+| --- | --- | --- |
+| `no stdin data received in 3s` | CLI 在等 stdin | 把参数写全，或把标准输入设为「关闭」 |
+| `Input must be provided ... --print` | `--print` 模式缺提示词 | 写成 `claude -p "你的问题"` |
+| `Raw mode is not supported` / `not a tty` | 需要真 TTY | 点「打开外部终端」 |
+
+### 3.4 输出流转发
 
 ```
 子进程 stdout/stderr → tokio read(8KB) → UTF-8 增量解码（跨块多字节不乱码）
@@ -154,7 +169,7 @@ Windows 上 `pwsh.exe` 不存在时会自动回退 `powershell.exe` 并在终端
   → 前端按 rAF 合批 → ANSI SGR 渲染（颜色 / 加粗 / 变暗 / 反色）
 ```
 
-### 3.3 进程树终止
+### 3.5 进程树终止
 
 | 平台 | 实现 |
 | --- | --- |
@@ -164,14 +179,14 @@ Windows 上 `pwsh.exe` 不存在时会自动回退 `powershell.exe` 并在终端
 停止是「发信号 + 由 waiter 收敛状态」：`stopping = true` → `Stopping` → 进程真正退出后转 `Stopped`，
 避免出现「按钮已置为停止但进程还在」的假状态。
 
-### 3.4 健康检查
+### 3.6 健康检查
 
 - 类型：TCP 端口探活，或本机 HTTP GET（自带极简客户端，只读状态行，不引 HTTP 依赖）。
 - 参数：`timeoutMs` / `retry` / `intervalMs`；通过后才把状态从 `Starting` 提升为 `Running`。
 - 超时：标记 `Failed` + 记录原因，并终止该会话进程树。
 - 无常健康检查的项目：spawn 成功即 `Running`。
 
-### 3.5 状态机
+### 3.7 状态机
 
 ```
 Stopped → Starting → Running → Stopping → Stopped
@@ -182,7 +197,7 @@ Running → Failed（非零退出 / 健康检查失败 / 启动失败）
 `Starting` / `Stopping` / `Restarting` 期间拒绝重复触发同一操作；
 `Failed` 保留退出码、错误原因与日志尾部。`restartOnCrash` 开启时按 `maxRestarts` 自动重启（1.2s 退避）。
 
-### 3.6 批量编排
+### 3.8 批量编排
 
 - `dependsOn` → Kahn 拓扑排序，同层按界面顺序保持稳定；检测到环直接报错（`依赖存在循环：a / b`）。
 - 一键运行：正序启动，前序健康检查通过后再启动后继；`failFast` 决定前序失败时中止还是跳过继续。

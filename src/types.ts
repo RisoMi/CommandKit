@@ -52,6 +52,8 @@ export interface Component {
   projectId: string;
   stack: string;
   workdir: string;
+  /** 标准输入策略：pipe（可输入）| null（立即 EOF） */
+  stdinMode: 'pipe' | 'null';
   /** 引用的环境 id；环境提供基础变量，env 作为覆盖 */
   envProfile: string | null;
   commands: CommandStep[];

@@ -59,7 +59,13 @@ const effectiveShell = computed(() => {
 
 const firstCmd = computed(() => steps.value.find((s) => s.cmd.trim())?.cmd ?? '');
 
+/** stdin 只允许 pipe / null 两种取值 */
+function stdoutFix(v: string): 'pipe' | 'null' {
+  return v === 'null' ? 'null' : 'pipe';
+}
+
 // 环境引用：'' 表示不使用
+const stdinSel = ref<string>(draft.stdinMode ?? 'pipe');
 const envSel = ref<string>(draft.envProfile ?? '');
 const envProfile = computed(() => state.environments.find((e) => e.id === envSel.value));
 const envProfileVars = computed(() => Object.keys(envProfile.value?.env ?? {}));
@@ -147,6 +153,7 @@ async function submit() {
   if (draft.health && healthKind.value === 'url' && !draft.health.url?.trim()) {
     draft.health = null;
   }
+  draft.stdinMode = stdoutFix(stdinSel.value);
   draft.envProfile = envSel.value || null;
   draft.shell =
     shellSel.value === ''
@@ -238,6 +245,13 @@ function drop() {
             <input v-model="portsText" placeholder="8000, 8001" />
           </div>
           <div class="field">
+            <label>标准输入</label>
+            <select v-model="stdinSel">
+              <option value="pipe">可输入（默认）</option>
+              <option value="null">关闭（立即 EOF）</option>
+            </select>
+          </div>
+          <div class="field">
             <label>执行 shell</label>
             <select v-model="shellSel">
               <option value="">跟随设置（{{ defaultShell }}）</option>
@@ -253,6 +267,11 @@ function drop() {
             />
           </div>
         </div>
+
+        <span class="hint" style="margin-top: -4px">
+          有些 CLI 会等 stdin 才继续（例如 <code>claude --print</code> 等待提示词）；选「关闭」可让它立刻读到 EOF，
+          也能避免某些工具在管道下端等 3s。
+        </span>
 
         <div class="section-t">环境</div>
         <div class="row">

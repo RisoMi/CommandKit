@@ -16,6 +16,7 @@ fn project(id: &str, deps: &[&str]) -> Component {
         stack: String::new(),
         workdir: std::env::temp_dir().display().to_string(),
         env_profile: None,
+        stdin_mode: "pipe".into(),
         commands: vec![CommandStep::new("echo ok", Join::And)],
         env: Default::default(),
         ports: vec![],
@@ -270,6 +271,22 @@ fn export_then_import_roundtrip() {
         vec![imported_alpha.id.clone()],
         "依赖应改写到新 id"
     );
+}
+
+/// 失败提示：能认出「缺提示词 / 需要 TTY」这类报错
+#[test]
+fn failure_hint_matches_known_cli_errors() {
+    use commandkit_lib::supervisor::failure_hint;
+
+    assert!(failure_hint("no stdin data received in 3s, proceeding without it").is_some());
+    assert!(failure_hint(
+        "Error: Input must be provided either through stdin or as a prompt argument when using --print"
+    )
+    .is_some());
+    assert!(failure_hint("Error: Raw mode is not supported on the current process.stdin").is_some());
+    // 普通失败不该乱给提示
+    assert!(failure_hint("error TS2307: Cannot find module 'vue'").is_none());
+    assert!(failure_hint("npm ERR! code ENOENT").is_none());
 }
 
 /// 环境合并：环境打底，组件自身同名变量覆盖

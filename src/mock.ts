@@ -61,6 +61,7 @@ function mkComponent(p: Partial<Component> & { id: string; name: string }): Comp
     projectId: 'all',
     stack: '',
     workdir: '',
+    stdinMode: 'pipe',
     envProfile: null,
     commands: [],
     env: {},
@@ -345,7 +346,7 @@ function snapshot(): Snapshot {
   return {
     info: {
       platform: 'macos',
-      version: '1.3.2',
+      version: '1.3.3',
       dataRoot: '~/Library/Application Support/CommandKit',
       writable: true,
       portable: false,
@@ -563,6 +564,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         projectId: projects[1]?.id ?? 'all',
         stack: 'imported',
         workdir: '~/work/imported',
+        stdinMode: 'pipe',
         envProfile: null,
         commands: [{ cmd: 'echo imported', join: 'and' }],
         env: {},

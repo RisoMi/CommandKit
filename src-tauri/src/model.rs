@@ -5,6 +5,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+fn default_stdin_mode() -> String {
+    "pipe".to_string()
+}
+
 fn default_project_id() -> String {
     "all".to_string()
 }
@@ -60,6 +64,9 @@ pub struct Component {
     /// 启动命令链：按顺序执行，步骤之间用「且 / 或」连接
     #[serde(default)]
     pub commands: Vec<CommandStep>,
+    /// 标准输入策略："pipe"（默认，可在终端里输入）| "null"（立即 EOF）
+    #[serde(default = "default_stdin_mode")]
+    pub stdin_mode: String,
     /// 引用的环境 id（环境提供基础变量，下面的 env 作为覆盖）
     #[serde(default)]
     pub env_profile: Option<String>,
