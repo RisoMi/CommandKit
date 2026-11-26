@@ -27,13 +27,18 @@ function cargo(args) {
 const hex = (code) => (code < 0 ? `0x${(code >>> 0).toString(16).toUpperCase()}` : String(code));
 
 function annotate(text, code, scope) {
-  const key = text
-    .split(/\r?\n/)
-    .filter((l) =>
-      /^error(\[|:)|panicked at|^test .* FAILED|^---- .* stdout ----|assertion .* failed|^failures:$/.test(l)
-    );
-  for (const line of key.slice(0, 20)) {
-    console.log(`::error::[${scope}] ${line.replace(/[\r\n]+/g, ' ').slice(0, 360)}`);
+  const lines = text.split(/\r?\n/);
+  const key = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^error(\[|:)|panicked at|^test .* FAILED|^---- .* stdout ----|assertion .* failed|^failures:$/.test(l)) {
+      key.push(l);
+      // panicked at 后面的第一行是断言内容，别丢
+      if (/panicked at/.test(l) && lines[i + 1]) key.push(lines[i + 1]);
+    }
+  }
+  for (const line of key.slice(0, 24)) {
+    console.log(`::error::[${scope}] ${line.replace(/[\r\n]+/g, ' ').slice(0, 900)}`);
   }
   if (!key.length) {
     console.log(`::error::[${scope}] 退出码 ${hex(code)}，未匹配到错误行（进程可能被外部中断）`);

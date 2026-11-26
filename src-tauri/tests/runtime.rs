@@ -291,7 +291,13 @@ async fn pty_mode_gives_real_tty() {
     }
     let text = log_text(&state, "t-pty");
     if cfg!(windows) {
-        assert!(text.contains("tty") && !text.contains("redirected"), "ConPTY 下不应是重定向：{text}");
+        // ConPTY 下应当是控制台而不是重定向；输出里可能夹 ANSI，做一次宽松匹配
+        let plain = text.replace('\u{1b}', "");
+        assert!(
+            plain.contains("tty") && !plain.contains("redirected"),
+            "ConPTY 下不应是重定向，实际输出：{:?}",
+            plain
+        );
     } else {
         assert!(text.contains("/dev/"), "应输出 pty 设备名：{text}");
     }
